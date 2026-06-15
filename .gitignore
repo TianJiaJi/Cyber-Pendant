@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Editor and environment files
+.idea/
+.vscode/
+*.swp
+*.swo
+.env
+.env.*
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

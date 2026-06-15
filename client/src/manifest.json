@@ -1,0 +1,22 @@
+{
+  "name": "Cyber-Pendant",
+  "appid": "__UNI__CYBERPENDANT",
+  "description": "Digital garment hang tag query system.",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "h5": {
+    "router": {
+      "mode": "hash",
+      "base": "./"
+    },
+    "title": "Cyber Pendant"
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  }
+}

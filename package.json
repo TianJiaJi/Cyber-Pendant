@@ -1,0 +1,15 @@
+{
+  "name": "cyber-pendant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Digital garment hang tag query system with Uni-app H5 frontend and SQLite API backend.",
+  "scripts": {
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev:h5",
+    "build:client": "npm --prefix client run build:h5",
+    "test": "npm --prefix server test"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

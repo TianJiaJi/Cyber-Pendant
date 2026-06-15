@@ -1,0 +1,38 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "Cyber Pendant",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/garment/detail",
+      "style": {
+        "navigationBarTitleText": "吊牌详情",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/admin/login",
+      "style": {
+        "navigationBarTitleText": "后台登录",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/admin/dashboard",
+      "style": {
+        "navigationBarTitleText": "管理后台",
+        "navigationStyle": "custom"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Cyber Pendant",
+    "navigationBarBackgroundColor": "#f6f3ee",
+    "backgroundColor": "#f6f3ee"
+  }
+}

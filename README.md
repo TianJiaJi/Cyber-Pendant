@@ -1,4 +1,4 @@
-# Cyber Pendant
+# Cyber-Pendant
 
 Initial repository for the Cyber Pendant project.
 

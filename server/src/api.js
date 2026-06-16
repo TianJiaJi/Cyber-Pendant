@@ -3,16 +3,36 @@ import QRCode from 'qrcode';
 import { createToken, verifyPassword, verifyToken } from './auth.js';
 import { createConfig } from './config.js';
 import {
+  deleteBatchHard,
+  deleteClothingHard,
+  deleteGarmentHard,
   findAdminByUsername,
+  findBatchById,
+  findClothingById,
   findGarmentBySn,
+  findGarmentDetailBySn,
+  insertBatch,
+  insertClothing,
   insertGarment,
+  listBatchesByClothingId,
+  listClothes,
   listGarments,
+  listGarmentsByBatchId,
   migrateDatabase,
+  normalizeBatchInput,
+  normalizeClothingInput,
   normalizeGarmentInput,
   openDatabase,
+  setBatchStatus,
+  setClothingStatus,
+  toBatchDto,
+  toClothingDto,
   toGarmentDto,
+  updateBatch,
+  updateClothing,
   updateGarment,
-  validateGarmentForCreate
+  validateBatchForCreate,
+  validateClothingForCreate
 } from './db.js';
 import { generateUniqueSn, normalizeSn } from './sn.js';
 
@@ -30,7 +50,7 @@ function setCorsHeaders(req, res, config) {
 
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
 }
 
 function sendJson(req, res, config, status, payload) {
@@ -91,6 +111,34 @@ function parsePathSn(pathname, prefix) {
   return value ? normalizeSn(decodeURIComponent(value)) : null;
 }
 
+function parsePathId(pathname, prefix) {
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+
+  const value = pathname.slice(prefix.length);
+  return /^\d+$/.test(value) ? Number(value) : null;
+}
+
+function parseClothingBatchesPath(pathname) {
+  const match = pathname.match(/^\/api\/clothes\/(\d+)\/batches$/);
+  return match ? Number(match[1]) : null;
+}
+
+function readPositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function wantsHardDelete(searchParams) {
+  return searchParams.get('hard') === '1' || searchParams.get('hard') === 'true';
+}
+
+function batchWithGarments(context, batch) {
+  const garments = listGarmentsByBatchId(context.db, batch.id).map(toGarmentDto);
+  return toBatchDto(batch, garments);
+}
+
 async function handleLogin(req, res, context) {
   const body = await readJson(req);
   const username = String(body.username || '').trim();
@@ -112,14 +160,14 @@ async function handleLogin(req, res, context) {
 }
 
 function handlePublicGarment(req, res, context, sn) {
-  const row = findGarmentBySn(context.db, sn);
+  const row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
     throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
   }
 
   const garment = toGarmentDto(row);
-  if (row.status !== 'active') {
+  if (garment.status !== 'active') {
     sendJson(req, res, context.config, 423, {
       message: '该吊牌已停用',
       garment
@@ -128,6 +176,155 @@ function handlePublicGarment(req, res, context, sn) {
   }
 
   sendJson(req, res, context.config, 200, { garment });
+}
+
+async function handleCreateClothing(req, res, context) {
+  requireAdmin(req, context.config);
+  const body = await readJson(req);
+  const clothing = normalizeClothingInput(body);
+  const validationError = validateClothingForCreate(clothing);
+
+  if (validationError) {
+    throw new HttpError(400, validationError);
+  }
+
+  const created = insertClothing(context.db, clothing);
+  sendJson(req, res, context.config, 201, { clothing: toClothingDto(created) });
+}
+
+async function handleUpdateClothing(req, res, context, clothingId) {
+  requireAdmin(req, context.config);
+  const existing = findClothingById(context.db, clothingId);
+
+  if (!existing) {
+    throw new HttpError(404, '未找到该衣服');
+  }
+
+  const body = await readJson(req);
+  const patch = normalizeClothingInput(body, { partial: true });
+  const merged = normalizeClothingInput({ ...existing, ...body });
+  const validationError = validateClothingForCreate(merged);
+
+  if (validationError) {
+    throw new HttpError(400, validationError);
+  }
+
+  const updated = updateClothing(context.db, clothingId, patch);
+  sendJson(req, res, context.config, 200, { clothing: toClothingDto(updated) });
+}
+
+function handleDeleteClothing(req, res, context, clothingId, searchParams) {
+  requireAdmin(req, context.config);
+  const existing = findClothingById(context.db, clothingId);
+
+  if (!existing) {
+    throw new HttpError(404, '未找到该衣服');
+  }
+
+  if (wantsHardDelete(searchParams)) {
+    deleteClothingHard(context.db, clothingId);
+    sendJson(req, res, context.config, 200, { ok: true, deleted: 'hard' });
+    return;
+  }
+
+  const updated = setClothingStatus(context.db, clothingId, 'inactive');
+  sendJson(req, res, context.config, 200, {
+    ok: true,
+    deleted: 'soft',
+    clothing: toClothingDto(updated)
+  });
+}
+
+async function handleCreateBatch(req, res, context, clothingId) {
+  requireAdmin(req, context.config);
+  const clothing = findClothingById(context.db, clothingId);
+
+  if (!clothing) {
+    throw new HttpError(404, '未找到该衣服');
+  }
+
+  if (clothing.status !== 'active') {
+    throw new HttpError(400, '该衣服已停用，不能生成新批次');
+  }
+
+  const body = await readJson(req);
+  const count = readPositiveInteger(body.count);
+
+  if (!count) {
+    throw new HttpError(400, '生成数量必须大于 0');
+  }
+
+  if (count > 500) {
+    throw new HttpError(400, '单次最多生成 500 个吊牌');
+  }
+
+  const batchInput = {
+    ...normalizeBatchInput(body),
+    clothing_id: clothing.id,
+    status: 'active'
+  };
+  const validationError = validateBatchForCreate(batchInput);
+
+  if (validationError) {
+    throw new HttpError(400, validationError);
+  }
+
+  let batch;
+  context.db.exec('BEGIN IMMEDIATE;');
+  try {
+    batch = insertBatch(context.db, batchInput);
+    for (let index = 0; index < count; index += 1) {
+      insertGarment(context.db, generateUniqueSn(context.db), {
+        clothing_id: clothing.id,
+        batch_id: batch.id,
+        status: 'active'
+      });
+    }
+    context.db.exec('COMMIT;');
+  } catch (error) {
+    context.db.exec('ROLLBACK;');
+    throw error;
+  }
+
+  sendJson(req, res, context.config, 201, { batch: batchWithGarments(context, batch) });
+}
+
+async function handleUpdateBatch(req, res, context, batchId) {
+  requireAdmin(req, context.config);
+  const existing = findBatchById(context.db, batchId);
+
+  if (!existing) {
+    throw new HttpError(404, '未找到该批次');
+  }
+
+  const body = await readJson(req);
+  const patch = normalizeBatchInput(body, { partial: true });
+  const updated = updateBatch(context.db, batchId, patch);
+  sendJson(req, res, context.config, 200, {
+    batch: batchWithGarments(context, updated)
+  });
+}
+
+function handleDeleteBatch(req, res, context, batchId, searchParams) {
+  requireAdmin(req, context.config);
+  const existing = findBatchById(context.db, batchId);
+
+  if (!existing) {
+    throw new HttpError(404, '未找到该批次');
+  }
+
+  if (wantsHardDelete(searchParams)) {
+    deleteBatchHard(context.db, batchId);
+    sendJson(req, res, context.config, 200, { ok: true, deleted: 'hard' });
+    return;
+  }
+
+  const updated = setBatchStatus(context.db, batchId, 'inactive');
+  sendJson(req, res, context.config, 200, {
+    ok: true,
+    deleted: 'soft',
+    batch: batchWithGarments(context, updated)
+  });
 }
 
 async function handleCreateGarment(req, res, context) {
@@ -139,15 +336,43 @@ async function handleCreateGarment(req, res, context) {
     throw new HttpError(409, 'SN 码已存在');
   }
 
-  const garment = normalizeGarmentInput(body);
-  const validationError = validateGarmentForCreate(garment);
+  const clothing = normalizeClothingInput(body);
+  const clothingValidationError = validateClothingForCreate(clothing);
 
-  if (validationError) {
-    throw new HttpError(400, validationError);
+  if (clothingValidationError) {
+    throw new HttpError(400, clothingValidationError);
   }
 
-  const created = insertGarment(context.db, sn, garment);
-  sendJson(req, res, context.config, 201, { garment: toGarmentDto(created) });
+  const batch = normalizeBatchInput(body);
+  const batchValidationError = validateBatchForCreate(batch);
+
+  if (batchValidationError) {
+    throw new HttpError(400, batchValidationError);
+  }
+
+  let created;
+  context.db.exec('BEGIN IMMEDIATE;');
+  try {
+    const clothingRow = insertClothing(context.db, clothing);
+    const batchRow = insertBatch(context.db, {
+      ...batch,
+      clothing_id: clothingRow.id,
+      status: 'active'
+    });
+    created = insertGarment(context.db, sn, {
+      clothing_id: clothingRow.id,
+      batch_id: batchRow.id,
+      status: 'active'
+    });
+    context.db.exec('COMMIT;');
+  } catch (error) {
+    context.db.exec('ROLLBACK;');
+    throw error;
+  }
+
+  sendJson(req, res, context.config, 201, {
+    garment: toGarmentDto(findGarmentDetailBySn(context.db, created.sn))
+  });
 }
 
 async function handleUpdateGarment(req, res, context, sn) {
@@ -165,8 +390,30 @@ async function handleUpdateGarment(req, res, context, sn) {
   sendJson(req, res, context.config, 200, { garment: toGarmentDto(updated) });
 }
 
+function handleDeleteGarment(req, res, context, sn, searchParams) {
+  requireAdmin(req, context.config);
+  const existing = findGarmentBySn(context.db, sn);
+
+  if (!existing) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  if (wantsHardDelete(searchParams)) {
+    deleteGarmentHard(context.db, sn);
+    sendJson(req, res, context.config, 200, { ok: true, deleted: 'hard' });
+    return;
+  }
+
+  const updated = updateGarment(context.db, sn, { status: 'inactive' });
+  sendJson(req, res, context.config, 200, {
+    ok: true,
+    deleted: 'soft',
+    garment: toGarmentDto(updated)
+  });
+}
+
 async function handleQrCode(req, res, context, sn, searchParams) {
-  const row = findGarmentBySn(context.db, sn);
+  const row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
     throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
@@ -215,9 +462,84 @@ async function route(req, res, context) {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/api/clothes') {
+    requireAdmin(req, context.config);
+    const rows = listClothes(context.db, searchParams.get('q') || '');
+    sendJson(req, res, context.config, 200, {
+      clothes: rows.map(toClothingDto)
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/clothes') {
+    await handleCreateClothing(req, res, context);
+    return;
+  }
+
+  const clothingBatchesId = parseClothingBatchesPath(pathname);
+  if (clothingBatchesId && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const clothing = findClothingById(context.db, clothingBatchesId);
+
+    if (!clothing) {
+      throw new HttpError(404, '未找到该衣服');
+    }
+
+    const batches = listBatchesByClothingId(context.db, clothingBatchesId).map((batch) =>
+      batchWithGarments(context, batch)
+    );
+    sendJson(req, res, context.config, 200, { batches });
+    return;
+  }
+
+  if (clothingBatchesId && req.method === 'POST') {
+    await handleCreateBatch(req, res, context, clothingBatchesId);
+    return;
+  }
+
+  const clothingId = parsePathId(pathname, '/api/clothes/');
+  if (clothingId && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const clothing = findClothingById(context.db, clothingId);
+
+    if (!clothing) {
+      throw new HttpError(404, '未找到该衣服');
+    }
+
+    sendJson(req, res, context.config, 200, {
+      clothing: toClothingDto(clothing)
+    });
+    return;
+  }
+
+  if (clothingId && req.method === 'PUT') {
+    await handleUpdateClothing(req, res, context, clothingId);
+    return;
+  }
+
+  if (clothingId && req.method === 'DELETE') {
+    handleDeleteClothing(req, res, context, clothingId, searchParams);
+    return;
+  }
+
+  const batchId = parsePathId(pathname, '/api/batches/');
+  if (batchId && req.method === 'PUT') {
+    await handleUpdateBatch(req, res, context, batchId);
+    return;
+  }
+
+  if (batchId && req.method === 'DELETE') {
+    handleDeleteBatch(req, res, context, batchId, searchParams);
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/garments') {
     requireAdmin(req, context.config);
-    const rows = listGarments(context.db, searchParams.get('q') || '');
+    const rows = listGarments(context.db, {
+      query: searchParams.get('q') || '',
+      clothingId: searchParams.get('clothingId') || '',
+      batchId: searchParams.get('batchId') || ''
+    });
     sendJson(req, res, context.config, 200, {
       garments: rows.map(toGarmentDto)
     });
@@ -243,6 +565,11 @@ async function route(req, res, context) {
 
   if (garmentSn && req.method === 'PUT') {
     await handleUpdateGarment(req, res, context, garmentSn);
+    return;
+  }
+
+  if (garmentSn && req.method === 'DELETE') {
+    handleDeleteGarment(req, res, context, garmentSn, searchParams);
     return;
   }
 

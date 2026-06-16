@@ -2,7 +2,6 @@
   <view class="page-shell home-page">
     <view class="topbar">
       <text class="brand-mark">Cyber Pendant</text>
-      <button class="admin-link" @click="goAdmin">后台</button>
     </view>
 
     <view class="hero-layout">
@@ -110,12 +109,6 @@ async function lookup() {
   }
 }
 
-function goAdmin() {
-  uni.navigateTo({
-    url: '/pages/admin/login'
-  });
-}
-
 async function handleScan() {
   message.value = '';
 
@@ -193,7 +186,7 @@ onBeforeUnmount(() => {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   max-width: 1180px;
   margin: 0 auto 42rpx;
 }
@@ -202,17 +195,6 @@ onBeforeUnmount(() => {
   color: #151515;
   font-size: 26rpx;
   font-weight: 700;
-}
-
-.admin-link {
-  min-width: 112rpx;
-  height: 64rpx;
-  border: 1px solid #d8d1c7;
-  border-radius: 999rpx;
-  background: #fffdf9;
-  color: #1b1b1b;
-  font-size: 24rpx;
-  line-height: 62rpx;
 }
 
 .hero-layout {
@@ -355,13 +337,6 @@ onBeforeUnmount(() => {
 
   .brand-mark {
     font-size: 14px;
-  }
-
-  .admin-link {
-    min-width: 76px;
-    height: 36px;
-    font-size: 13px;
-    line-height: 34px;
   }
 
   .hero-layout {

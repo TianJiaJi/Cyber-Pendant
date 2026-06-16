@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "cyber-pendant": "file:..",
     "qrcode": "latest"
   },
   "engines": {

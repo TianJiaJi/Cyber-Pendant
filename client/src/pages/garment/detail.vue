@@ -2,7 +2,6 @@
   <view class="page-shell detail-page">
     <view class="detail-topbar">
       <button class="ghost-button" @click="goHome">返回查询</button>
-      <button class="secondary-button" @click="goAdmin">管理后台</button>
     </view>
 
     <view v-if="loading" class="state-block">
@@ -66,7 +65,7 @@ const fields = computed(() => {
     { label: '厂家', value: current.manufacturer },
     { label: '厂家地址', value: current.manufacturerAddress },
     { label: '洗护说明', value: current.careInstructions },
-    { label: '生产批次', value: current.batchNo },
+    { label: '批次标签', value: current.batchNo },
     { label: '生产日期', value: current.productionDate },
     { label: '备注', value: current.remark }
   ];
@@ -102,11 +101,6 @@ function goHome() {
   });
 }
 
-function goAdmin() {
-  uni.navigateTo({
-    url: '/pages/admin/login'
-  });
-}
 </script>
 
 <style scoped>
@@ -116,7 +110,7 @@ function goAdmin() {
 
 .detail-topbar {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 18rpx;
   max-width: 1080px;
   margin: 0 auto 32rpx;

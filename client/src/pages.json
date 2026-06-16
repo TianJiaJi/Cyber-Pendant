@@ -27,6 +27,13 @@
         "navigationBarTitleText": "管理后台",
         "navigationStyle": "custom"
       }
+    },
+    {
+      "path": "pages/admin/clothing-detail",
+      "style": {
+        "navigationBarTitleText": "衣服详情",
+        "navigationStyle": "custom"
+      }
     }
   ],
   "globalStyle": {

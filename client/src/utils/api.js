@@ -68,8 +68,82 @@ export function getPublicGarment(sn) {
   });
 }
 
-export function listGarments(query = '') {
-  const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+function appendQuery(params, key, value) {
+  if (value !== undefined && value !== null && String(value).trim() !== '') {
+    params.push(`${key}=${encodeURIComponent(value)}`);
+  }
+}
+
+function hardDeleteSuffix(hard) {
+  return hard ? '?hard=1' : '';
+}
+
+export function listClothes(query = '') {
+  const params = [];
+  appendQuery(params, 'q', query);
+  const suffix = params.length ? `?${params.join('&')}` : '';
+  return request(`/api/clothes${suffix}`);
+}
+
+export function createClothing(data) {
+  return request('/api/clothes', {
+    method: 'POST',
+    data
+  });
+}
+
+export function getClothing(id) {
+  return request(`/api/clothes/${encodeURIComponent(id)}`);
+}
+
+export function updateClothing(id, data) {
+  return request(`/api/clothes/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    data
+  });
+}
+
+export function deleteClothing(id, hard = false) {
+  return request(`/api/clothes/${encodeURIComponent(id)}${hardDeleteSuffix(hard)}`, {
+    method: 'DELETE'
+  });
+}
+
+export function listClothingBatches(clothingId) {
+  return request(`/api/clothes/${encodeURIComponent(clothingId)}/batches`);
+}
+
+export function createClothingBatch(clothingId, data) {
+  return request(`/api/clothes/${encodeURIComponent(clothingId)}/batches`, {
+    method: 'POST',
+    data
+  });
+}
+
+export function updateBatch(id, data) {
+  return request(`/api/batches/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    data
+  });
+}
+
+export function deleteBatch(id, hard = false) {
+  return request(`/api/batches/${encodeURIComponent(id)}${hardDeleteSuffix(hard)}`, {
+    method: 'DELETE'
+  });
+}
+
+export function listGarments(filters = {}) {
+  const params = [];
+  const query = typeof filters === 'string' ? filters : filters.query;
+  const clothingId = typeof filters === 'string' ? '' : filters.clothingId;
+  const batchId = typeof filters === 'string' ? '' : filters.batchId;
+
+  appendQuery(params, 'q', query);
+  appendQuery(params, 'clothingId', clothingId);
+  appendQuery(params, 'batchId', batchId);
+
+  const suffix = params.length ? `?${params.join('&')}` : '';
   return request(`/api/garments${suffix}`);
 }
 
@@ -84,6 +158,12 @@ export function updateGarment(sn, data) {
   return request(`/api/garments/${encodeURIComponent(sn)}`, {
     method: 'PUT',
     data
+  });
+}
+
+export function deleteGarment(sn, hard = false) {
+  return request(`/api/garments/${encodeURIComponent(sn)}${hardDeleteSuffix(hard)}`, {
+    method: 'DELETE'
   });
 }
 

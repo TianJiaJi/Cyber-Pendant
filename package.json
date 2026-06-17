@@ -4,6 +4,8 @@
   "private": true,
   "description": "Digital garment hang tag query system with Uni-app H5 frontend and SQLite API backend.",
   "scripts": {
+    "dev": "npm run dev:server",
+    "start": "npm --prefix server start",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev:h5",
     "dev:admin": "npm --prefix server/admin run dev",

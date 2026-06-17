@@ -18,11 +18,13 @@ Cyber-Pendant is a digital garment hang tag system. Users scan QR codes or enter
 npm --prefix server install && npm --prefix client install && npm --prefix server/admin install
 
 # Development (run in separate terminals)
-npm run dev:server   # node --watch server/src/index.js
+npm run dev          # backend with auto-prepared admin console
+npm run dev:server   # same backend dev server
 npm run dev:client   # uni -p h5 (H5) or uni -p mp-weixin (Mini Program)
-npm run dev:admin    # Vite admin console on port 5174, proxies /api to backend
+npm run dev:admin    # optional admin hot reload server
 
 # Build
+npm start            # production backend with auto-prepared admin console
 npm run build:client # uni build -p h5
 npm run build:admin  # Vite build to server/admin/dist for backend hosting
 
@@ -47,6 +49,7 @@ API design (no framework):
 - `HttpError` class for error responses
 - CORS configurable via `CORS_ORIGIN` env var
 - Admin SPA static hosting is configurable with `ADMIN_BASE_PATH` (default `/admin`) and `ADMIN_STATIC_DIR` (default `server/admin/dist`)
+- `server/src/index.js` runs `ensureAdminBuild()` before listening, so server startup automatically installs/builds the admin console when needed
 
 ### Client (Uni-app Vue 3)
 

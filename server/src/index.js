@@ -1,5 +1,7 @@
 import { createApp } from './api.js';
+import { ensureAdminBuild } from './prepare-admin.js';
 
+ensureAdminBuild();
 const { server, config } = createApp();
 
 server.listen(config.port, () => {

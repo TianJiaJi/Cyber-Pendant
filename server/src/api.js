@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { createToken, verifyPassword, verifyToken } from './auth.js';
 import { createConfig } from './config.js';
 import {
+  bindGarmentOwner,
   deleteBatchHard,
   deleteClothingHard,
   deleteGarmentHard,
@@ -126,6 +127,11 @@ function parseClothingBatchesPath(pathname) {
   return match ? Number(match[1]) : null;
 }
 
+function parseGarmentBindingPath(pathname) {
+  const match = pathname.match(/^\/api\/garments\/([^/]+)\/binding$/);
+  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+}
+
 function readPositiveInteger(value) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
@@ -165,6 +171,26 @@ function shouldTrackLookup(searchParams) {
   return track !== '0' && track !== 'false';
 }
 
+function normalizeBindingInput(body) {
+  const ownerName = String(body.ownerName || '').trim();
+  const rawPhoneTail = String(body.ownerPhoneTail || body.phoneTail || '').trim();
+  const ownerPhoneTail = rawPhoneTail.replace(/\D/g, '');
+
+  if (!ownerName) {
+    throw new HttpError(400, '请输入绑定人姓名');
+  }
+
+  if (ownerName.length > 24) {
+    throw new HttpError(400, '绑定人姓名不能超过 24 个字符');
+  }
+
+  if (!/^\d{4}$/.test(ownerPhoneTail)) {
+    throw new HttpError(400, '请输入手机号后四位');
+  }
+
+  return { ownerName, ownerPhoneTail };
+}
+
 function handlePublicGarment(req, res, context, sn, searchParams) {
   let row = findGarmentDetailBySn(context.db, sn);
 
@@ -186,6 +212,34 @@ function handlePublicGarment(req, res, context, sn, searchParams) {
   }
 
   sendJson(req, res, context.config, 200, { garment });
+}
+
+async function handleBindGarment(req, res, context, sn) {
+  const row = findGarmentDetailBySn(context.db, sn);
+
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  const garment = toGarmentDto(row);
+  if (garment.status !== 'active') {
+    throw new HttpError(400, '该吊牌已停用，不能绑定主人');
+  }
+
+  if (garment.isBound) {
+    throw new HttpError(409, '该吊牌已绑定主人');
+  }
+
+  const binding = normalizeBindingInput(await readJson(req));
+  const updated = bindGarmentOwner(context.db, sn, binding);
+
+  if (!updated.changed) {
+    throw new HttpError(409, '该吊牌已绑定主人');
+  }
+
+  sendJson(req, res, context.config, 200, {
+    garment: toGarmentDto(updated.garment)
+  });
 }
 
 async function handleCreateClothing(req, res, context) {
@@ -564,6 +618,12 @@ async function route(req, res, context) {
   if (req.method === 'POST' && pathname === '/api/sn/generate') {
     requireAdmin(req, context.config);
     sendJson(req, res, context.config, 200, { sn: generateUniqueSn(context.db) });
+    return;
+  }
+
+  const bindingSn = parseGarmentBindingPath(pathname);
+  if (bindingSn && req.method === 'POST') {
+    await handleBindGarment(req, res, context, bindingSn);
     return;
   }
 

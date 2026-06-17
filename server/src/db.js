@@ -147,7 +147,6 @@ export function migrateDatabase(db, config) {
       batch_no TEXT,
       production_date TEXT,
       remark TEXT,
-      query_count INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -173,6 +172,10 @@ export function migrateDatabase(db, config) {
       batch_no TEXT,
       production_date TEXT,
       remark TEXT,
+      query_count INTEGER NOT NULL DEFAULT 0,
+      owner_name TEXT,
+      owner_phone_tail TEXT,
+      owner_bound_at TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -189,6 +192,7 @@ export function migrateDatabase(db, config) {
   ensureGarmentColumn(db, 'batch_id');
   ensureGarmentColumn(db, 'style_id');
   ensureGarmentQueryCountColumn(db);
+  ensureGarmentBindingColumns(db);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_garments_clothing_id ON garments(clothing_id);
@@ -213,6 +217,18 @@ function ensureGarmentQueryCountColumn(db) {
   }
 
   db.prepare('UPDATE garments SET query_count = 0 WHERE query_count IS NULL').run();
+}
+
+function ensureGarmentTextColumn(db, columnName) {
+  if (!columnExists(db, 'garments', columnName)) {
+    db.exec(`ALTER TABLE garments ADD COLUMN ${columnName} TEXT;`);
+  }
+}
+
+function ensureGarmentBindingColumns(db) {
+  ensureGarmentTextColumn(db, 'owner_name');
+  ensureGarmentTextColumn(db, 'owner_phone_tail');
+  ensureGarmentTextColumn(db, 'owner_bound_at');
 }
 
 function seedAdmin(db, config) {
@@ -670,6 +686,25 @@ export function incrementGarmentQueryCount(db, sn) {
   return findGarmentDetailBySn(db, sn);
 }
 
+export function bindGarmentOwner(db, sn, binding) {
+  const timestamp = nowIso();
+  const result = db
+    .prepare(
+      `UPDATE garments
+       SET owner_name = ?,
+           owner_phone_tail = ?,
+           owner_bound_at = ?,
+           updated_at = ?
+       WHERE sn = ? AND owner_bound_at IS NULL`
+    )
+    .run(binding.ownerName, binding.ownerPhoneTail, timestamp, timestamp, sn);
+
+  return {
+    changed: result.changes > 0,
+    garment: findGarmentDetailBySn(db, sn)
+  };
+}
+
 export function findGarmentDetailBySn(db, sn) {
   return db
     .prepare(
@@ -678,6 +713,9 @@ export function findGarmentDetailBySn(db, sn) {
          g.sn,
          g.status AS sn_status,
          g.query_count,
+         g.owner_name,
+         g.owner_phone_tail,
+         g.owner_bound_at,
          g.created_at,
          g.updated_at,
          c.id AS clothing_id,
@@ -811,6 +849,16 @@ function effectiveStatus(row) {
     : 'inactive';
 }
 
+function maskOwnerName(value) {
+  const chars = Array.from(String(value || '').trim());
+
+  if (chars.length === 0) {
+    return null;
+  }
+
+  return `${chars[0]}${'*'.repeat(Math.max(1, Math.min(chars.length - 1, 2)))}`;
+}
+
 export function toClothingDto(row) {
   if (!row) {
     return null;
@@ -863,6 +911,7 @@ export function toGarmentDto(row) {
   }
 
   const status = row.sn_status ? effectiveStatus(row) : row.status;
+  const isBound = Boolean(row.owner_bound_at);
 
   return {
     id: row.id,
@@ -895,6 +944,14 @@ export function toGarmentDto(row) {
     clothingRemark: row.clothing_remark,
     batchRemark: row.batch_remark,
     queryCount: Number(row.query_count || 0),
+    isBound,
+    owner: isBound
+      ? {
+          name: maskOwnerName(row.owner_name),
+          phoneTail: row.owner_phone_tail,
+          boundAt: row.owner_bound_at
+        }
+      : null,
     status,
     snStatus: row.sn_status || row.status,
     clothingStatus: row.clothing_status,

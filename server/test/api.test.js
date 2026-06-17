@@ -151,6 +151,33 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   assert.equal(previewLookup.status, 200);
   assert.equal((await previewLookup.json()).garment.queryCount, 1);
 
+  const invalidBinding = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerName: '张三', ownerPhoneTail: '12' })
+  });
+  assert.equal(invalidBinding.status, 400);
+
+  const bound = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerName: '张三', ownerPhoneTail: '1234' })
+  });
+  assert.equal(bound.status, 200);
+  const boundGarment = (await bound.json()).garment;
+  assert.equal(boundGarment.isBound, true);
+  assert.equal(boundGarment.owner.name, '张*');
+  assert.equal(boundGarment.owner.phoneTail, '1234');
+  assert.ok(boundGarment.owner.boundAt);
+  assert.equal(boundGarment.ownerName, undefined);
+
+  const duplicateBinding = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerName: '李四', ownerPhoneTail: '5678' })
+  });
+  assert.equal(duplicateBinding.status, 409);
+
   const qr = await fetch(`${app.baseUrl}/api/qrcode/${sn}?type=url`);
   assert.equal(qr.status, 200);
   assert.equal(qr.headers.get('content-type'), 'image/png');

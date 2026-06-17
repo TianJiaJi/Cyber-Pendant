@@ -87,15 +87,19 @@
         </view>
 
         <view class="binding-card">
-          <view class="binding-badge">
-            <text class="binding-badge-text">身份</text>
+          <view :class="['binding-badge', isBound ? 'bound' : '']">
+            <text class="binding-badge-text">{{ isBound ? '已绑' : '身份' }}</text>
           </view>
           <view class="binding-copy">
-            <text class="binding-title">该校服暂未绑定主人</text>
-            <text class="binding-text">绑定身份让校服有归属防丢失</text>
+            <text class="binding-title">{{ bindingTitle }}</text>
+            <text class="binding-text">{{ bindingDescription }}</text>
           </view>
-          <button class="bind-button" hover-class="bind-button-hover" @click="handleBind">
-            立即绑定
+          <button
+            :class="['bind-button', isBound || isInactive ? 'disabled' : '']"
+            hover-class="bind-button-hover"
+            @click="handleBind"
+          >
+            {{ isBound ? '已绑定' : isInactive ? '不可绑定' : '立即绑定' }}
           </button>
         </view>
 
@@ -116,6 +120,50 @@
           </button>
         </view>
       </view>
+
+      <view v-if="bindingPanelVisible" class="bind-overlay">
+        <view class="bind-panel" @click.stop>
+          <view class="bind-panel-header">
+            <text class="bind-panel-title">绑定校服主人</text>
+            <button class="bind-close" hover-class="bind-close-hover" @click="closeBindingPanel">
+              关闭
+            </button>
+          </view>
+
+          <view class="bind-form">
+            <view class="bind-field">
+              <text class="bind-label">绑定人姓名</text>
+              <input
+                v-model="bindingForm.ownerName"
+                class="bind-input"
+                maxlength="24"
+                placeholder="例如 张三"
+              />
+            </view>
+            <view class="bind-field">
+              <text class="bind-label">手机号后四位</text>
+              <input
+                v-model="bindingForm.ownerPhoneTail"
+                class="bind-input"
+                type="number"
+                maxlength="4"
+                placeholder="用于找回时核验"
+              />
+            </view>
+            <text class="bind-help">绑定后公开页面只展示脱敏姓名和手机尾号。</text>
+            <text v-if="bindingMessage" class="bind-message">{{ bindingMessage }}</text>
+          </view>
+
+          <button
+            class="bind-submit"
+            :disabled="bindingSubmitting"
+            hover-class="bind-submit-hover"
+            @click="submitBinding"
+          >
+            {{ bindingSubmitting ? '绑定中' : '确认绑定' }}
+          </button>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -123,13 +171,20 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
-import { getPublicGarment, qrcodeUrl } from '../../utils/api.js';
+import { bindPublicGarment, getPublicGarment, qrcodeUrl } from '../../utils/api.js';
 
 const loading = ref(true);
 const garment = ref(null);
 const inactiveGarment = ref(null);
 const errorMessage = ref('');
 const companyExpanded = ref(false);
+const bindingPanelVisible = ref(false);
+const bindingSubmitting = ref(false);
+const bindingMessage = ref('');
+const bindingForm = ref({
+  ownerName: '',
+  ownerPhoneTail: ''
+});
 
 const currentGarment = computed(() => garment.value || inactiveGarment.value);
 
@@ -146,6 +201,36 @@ const qrCodeSrc = computed(() => {
 const queryCountText = computed(() => {
   const current = currentGarment.value;
   return String(Number(current?.queryCount || 0));
+});
+
+const ownerInfo = computed(() => currentGarment.value?.owner || null);
+const isBound = computed(() => Boolean(ownerInfo.value));
+
+const bindingTitle = computed(() => {
+  if (isBound.value) {
+    return '该校服已绑定主人';
+  }
+
+  if (isInactive.value) {
+    return '该校服暂不可绑定';
+  }
+
+  return '该校服暂未绑定主人';
+});
+
+const bindingDescription = computed(() => {
+  if (isBound.value) {
+    const phoneText = ownerInfo.value?.phoneTail
+      ? `手机号尾号 ${ownerInfo.value.phoneTail}`
+      : '身份信息已留存';
+    return `${ownerInfo.value?.name || '已绑定'} · ${phoneText}`;
+  }
+
+  if (isInactive.value) {
+    return '吊牌停用后不能绑定身份';
+  }
+
+  return '绑定身份让校服有归属防丢失';
 });
 
 const tagFields = computed(() => {
@@ -217,10 +302,78 @@ function toggleCompany() {
 }
 
 function handleBind() {
-  uni.showToast({
-    title: '绑定功能即将开放',
-    icon: 'none'
-  });
+  if (isBound.value) {
+    uni.showToast({
+      title: '该校服已绑定',
+      icon: 'none'
+    });
+    return;
+  }
+
+  if (isInactive.value) {
+    uni.showToast({
+      title: '停用吊牌不可绑定',
+      icon: 'none'
+    });
+    return;
+  }
+
+  bindingMessage.value = '';
+  bindingPanelVisible.value = true;
+}
+
+function closeBindingPanel() {
+  if (bindingSubmitting.value) {
+    return;
+  }
+
+  bindingPanelVisible.value = false;
+  bindingMessage.value = '';
+}
+
+function normalizePhoneTail() {
+  return bindingForm.value.ownerPhoneTail.replace(/\D/g, '').slice(0, 4);
+}
+
+async function submitBinding() {
+  const ownerName = bindingForm.value.ownerName.trim();
+  const ownerPhoneTail = normalizePhoneTail();
+  bindingForm.value.ownerPhoneTail = ownerPhoneTail;
+  bindingMessage.value = '';
+
+  if (!ownerName) {
+    bindingMessage.value = '请输入绑定人姓名。';
+    return;
+  }
+
+  if (!/^\d{4}$/.test(ownerPhoneTail)) {
+    bindingMessage.value = '请输入手机号后四位。';
+    return;
+  }
+
+  bindingSubmitting.value = true;
+
+  try {
+    const response = await bindPublicGarment(currentGarment.value.sn, {
+      ownerName,
+      ownerPhoneTail
+    });
+    garment.value = response.garment;
+    inactiveGarment.value = null;
+    bindingPanelVisible.value = false;
+    bindingForm.value = {
+      ownerName: '',
+      ownerPhoneTail: ''
+    };
+    uni.showToast({
+      title: '绑定成功',
+      icon: 'success'
+    });
+  } catch (error) {
+    bindingMessage.value = error.message || '绑定失败，请稍后再试。';
+  } finally {
+    bindingSubmitting.value = false;
+  }
 }
 
 </script>
@@ -254,7 +407,9 @@ function handleBind() {
 .nav-button,
 .state-action,
 .company-card,
-.bind-button {
+.bind-button,
+.bind-close,
+.bind-submit {
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -266,7 +421,9 @@ function handleBind() {
 .nav-button::after,
 .state-action::after,
 .company-card::after,
-.bind-button::after {
+.bind-button::after,
+.bind-close::after,
+.bind-submit::after {
   border: 0;
 }
 
@@ -676,6 +833,11 @@ function handleBind() {
   color: #5f584d;
 }
 
+.binding-badge.bound {
+  background: #edf4ea;
+  color: #5f8f55;
+}
+
 .binding-badge-text {
   font-size: 24rpx;
   font-weight: 700;
@@ -721,6 +883,11 @@ function handleBind() {
   background: #2b2b2b;
 }
 
+.bind-button.disabled {
+  background: #eee9df;
+  color: #746d62;
+}
+
 .support-footer {
   display: flex;
   align-items: center;
@@ -740,6 +907,121 @@ function handleBind() {
   font-size: 24rpx;
   line-height: 1.4;
   text-align: center;
+}
+
+.bind-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 32rpx;
+  background: rgba(20, 18, 15, 0.42);
+}
+
+.bind-panel {
+  width: 100%;
+  max-width: 444px;
+  padding: 34rpx;
+  border: 1px solid #ded5c9;
+  border-radius: 22rpx 22rpx 14rpx 14rpx;
+  background: #fffdf7;
+  box-shadow: 0 -20rpx 60rpx rgba(25, 21, 15, 0.18);
+}
+
+.bind-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.bind-panel-title {
+  color: #151515;
+  font-size: 34rpx;
+  font-weight: 760;
+  line-height: 1.3;
+}
+
+.bind-close {
+  flex: 0 0 auto;
+  min-height: 58rpx;
+  padding: 0 4rpx;
+  color: #777168;
+  font-size: 26rpx;
+}
+
+.bind-close-hover {
+  color: #151515;
+}
+
+.bind-form {
+  display: grid;
+  gap: 22rpx;
+  margin-top: 28rpx;
+}
+
+.bind-field {
+  display: grid;
+  gap: 12rpx;
+}
+
+.bind-label,
+.bind-help,
+.bind-message {
+  display: block;
+}
+
+.bind-label {
+  color: #5f584d;
+  font-size: 25rpx;
+  font-weight: 650;
+}
+
+.bind-input {
+  width: 100%;
+  min-height: 86rpx;
+  padding: 0 24rpx;
+  border: 1px solid #d8d1c7;
+  border-radius: 10rpx;
+  background: #fffaf1;
+  color: #151515;
+  font-size: 28rpx;
+}
+
+.bind-help {
+  color: #827a70;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
+.bind-message {
+  color: #9a3a2b;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.bind-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 86rpx;
+  margin-top: 30rpx;
+  border-radius: 10rpx;
+  background: #171717;
+  color: #fff;
+  font-size: 29rpx;
+  font-weight: 700;
+}
+
+.bind-submit-hover {
+  background: #2b2b2b;
+}
+
+.bind-submit[disabled] {
+  background: #b8b1a7;
+  color: #fff;
 }
 
 @media (min-width: 720px) {

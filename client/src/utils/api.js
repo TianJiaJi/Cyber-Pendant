@@ -69,6 +69,14 @@ export function getPublicGarment(sn, options = {}) {
   });
 }
 
+export function bindPublicGarment(sn, data) {
+  return request(`/api/garments/${encodeURIComponent(sn)}/binding`, {
+    method: 'POST',
+    auth: false,
+    data
+  });
+}
+
 function appendQuery(params, key, value) {
   if (value !== undefined && value !== null && String(value).trim() !== '') {
     params.push(`${key}=${encodeURIComponent(value)}`);

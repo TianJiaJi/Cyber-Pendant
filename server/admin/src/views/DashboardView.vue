@@ -1,209 +1,208 @@
 <template>
-  <view class="page-shell admin-page">
-    <view class="admin-topbar">
-      <view>
-        <text class="eyebrow">ADMIN WORKSPACE</text>
-        <text class="admin-title">校服吊牌后台</text>
-        <text class="admin-subtitle">先找到衣服主档，再进入详情生成批次 SN。</text>
-      </view>
-      <view class="topbar-actions">
+  <div class="page-shell admin-page">
+    <div class="admin-topbar">
+      <div>
+        <span class="eyebrow">ADMIN WORKSPACE</span>
+        <span class="admin-title">校服吊牌后台</span>
+        <span class="admin-subtitle">先找到衣服主档，再进入详情生成批次 SN。</span>
+      </div>
+      <div class="topbar-actions">
         <button class="secondary-button" @click="goHome">前台</button>
         <button class="ghost-button" @click="logout">退出</button>
-      </view>
-    </view>
+      </div>
+    </div>
 
-    <view class="admin-workspace">
-      <view class="summary-grid">
-        <view v-for="item in summaryCards" :key="item.label" class="summary-card">
-          <text class="summary-value">{{ item.value }}</text>
-          <text class="summary-label">{{ item.label }}</text>
-        </view>
-      </view>
+    <div class="admin-workspace">
+      <div class="summary-grid">
+        <div v-for="item in summaryCards" :key="item.label" class="summary-card">
+          <span class="summary-value">{{ item.value }}</span>
+          <span class="summary-label">{{ item.label }}</span>
+        </div>
+      </div>
 
-      <view class="records-panel">
-        <view class="records-heading">
-          <view>
-            <text class="section-title">衣服主档</text>
-            <text class="toolbar-meta">{{ clothes.length }} 条记录</text>
-          </view>
-          <view class="records-actions">
+      <div class="records-panel">
+        <div class="records-heading">
+          <div>
+            <span class="section-title">衣服主档</span>
+            <span class="toolbar-meta">{{ clothes.length }} 条记录</span>
+          </div>
+          <div class="records-actions">
             <button class="primary-button small-button" @click="openCreatePanel">
               新增衣服
             </button>
             <button class="secondary-button small-button" @click="loadClothes">刷新</button>
-          </view>
-        </view>
+          </div>
+        </div>
 
-        <view class="search-row">
+        <div class="search-row">
           <input
             v-model="query"
             class="form-input search-input"
-            confirm-type="search"
             placeholder="搜索衣服名称、面料、厂家、执行标准"
-            @confirm="loadClothes"
+            @keyup.enter="loadClothes"
           />
           <button class="secondary-button small-button" @click="loadClothes">搜索</button>
-        </view>
+        </div>
 
-        <view v-if="showCreatePanel" class="create-panel">
-          <view class="create-panel-head">
-            <view>
-              <text class="panel-title">新增衣服主档</text>
-              <text class="panel-copy">录入通用信息后，到详情页生成具体批次和 SN。</text>
-            </view>
+        <div v-if="showCreatePanel" class="create-panel">
+          <div class="create-panel-head">
+            <div>
+              <span class="panel-title">新增衣服主档</span>
+              <span class="panel-copy">录入通用信息后，到详情页生成具体批次和 SN。</span>
+            </div>
             <button class="ghost-button small-button" @click="closeCreatePanel">收起</button>
-          </view>
+          </div>
 
-          <view class="form-grid">
-            <view v-for="field in clothingTextFields" :key="field.key" class="form-field">
-              <text class="field-label">{{ field.label }}</text>
+          <div class="form-grid">
+            <div v-for="field in clothingTextFields" :key="field.key" class="form-field">
+              <span class="field-label">{{ field.label }}</span>
               <input
                 v-model="clothingForm[field.key]"
                 class="form-input"
                 :placeholder="field.placeholder"
               />
-            </view>
+            </div>
 
-            <view class="form-field wide-field">
-              <text class="field-label">执行标准</text>
+            <div class="form-field wide-field">
+              <span class="field-label">执行标准</span>
               <textarea
                 v-model="clothingForm.standard"
                 class="form-textarea standard-textarea"
                 :placeholder="standardPlaceholder"
               />
-            </view>
+            </div>
 
-            <view class="form-field wide-field">
-              <text class="field-label">面料</text>
+            <div class="form-field wide-field">
+              <span class="field-label">面料</span>
               <textarea
                 v-model="clothingForm.fabric"
                 class="form-textarea"
                 placeholder="例如 羊毛 58%，聚酯纤维 38%，氨纶 4%"
               />
-            </view>
+            </div>
 
-            <view class="form-field wide-field">
-              <text class="field-label">洗护说明</text>
+            <div class="form-field wide-field">
+              <span class="field-label">洗护说明</span>
               <textarea
                 v-model="clothingForm.careInstructions"
                 class="form-textarea"
                 placeholder="例如 不可漂白；悬挂晾干；低温熨烫。"
               />
-            </view>
+            </div>
 
-            <view class="form-field wide-field">
-              <text class="field-label">备注</text>
+            <div class="form-field wide-field">
+              <span class="field-label">备注</span>
               <textarea
                 v-model="clothingForm.remark"
                 class="form-textarea"
                 placeholder="衣服主档备注，不包含款号、颜色、尺码、批次。"
               />
-            </view>
-          </view>
+            </div>
+          </div>
 
-          <view class="editor-actions">
+          <div class="editor-actions">
             <button class="primary-button" :disabled="saving" @click="saveClothing">
               {{ saving ? '保存中' : '保存衣服主档' }}
             </button>
             <button class="ghost-button" @click="resetForm">清空</button>
-          </view>
-          <text v-if="formMessage" class="message-text">{{ formMessage }}</text>
-        </view>
+          </div>
+          <span v-if="formMessage" class="message-text">{{ formMessage }}</span>
+        </div>
 
-        <view v-if="lastCreatedClothing" class="next-step-banner">
-          <view>
-            <text class="next-step-title">已新增：{{ lastCreatedClothing.productName || '未命名衣服' }}</text>
-            <text class="next-step-copy">下一步进入详情，生成颜色、尺码和批次 SN。</text>
-          </view>
+        <div v-if="lastCreatedClothing" class="next-step-banner">
+          <div>
+            <span class="next-step-title">已新增：{{ lastCreatedClothing.productName || '未命名衣服' }}</span>
+            <span class="next-step-copy">下一步进入详情，生成颜色、尺码和批次 SN。</span>
+          </div>
           <button class="primary-button small-button" @click="goDetail(lastCreatedClothing.id)">
             进入详情
           </button>
-        </view>
+        </div>
 
-        <text v-if="listMessage" class="message-text panel-message">{{ listMessage }}</text>
+        <span v-if="listMessage" class="message-text panel-message">{{ listMessage }}</span>
 
-        <view v-if="loading" class="empty-state">正在加载衣服主档...</view>
-        <view v-else-if="clothes.length === 0" class="empty-state">
-          <text class="empty-title">暂无衣服主档</text>
-          <text class="empty-copy">先新增一个衣服主档，再到详情页生成批次 SN。</text>
+        <div v-if="loading" class="empty-state">正在加载衣服主档...</div>
+        <div v-else-if="clothes.length === 0" class="empty-state">
+          <span class="empty-title">暂无衣服主档</span>
+          <span class="empty-copy">先新增一个衣服主档，再到详情页生成批次 SN。</span>
           <button class="primary-button small-button" @click="openCreatePanel">新增衣服</button>
-        </view>
+        </div>
 
-        <view v-else class="clothing-list">
-          <view
+        <div v-else class="clothing-list">
+          <div
             v-for="item in clothes"
             :key="item.id"
             class="clothing-card"
             @click="goDetail(item.id)"
           >
-            <view class="clothing-card-head">
-              <view>
-                <text class="clothing-name">{{ item.productName || '未命名衣服' }}</text>
-                <text class="clothing-subtitle">{{ item.manufacturer || '未录入厂家' }}</text>
-              </view>
-              <text :class="['status-pill', item.status === 'inactive' ? 'inactive' : '']">
+            <div class="clothing-card-head">
+              <div>
+                <span class="clothing-name">{{ item.productName || '未命名衣服' }}</span>
+                <span class="clothing-subtitle">{{ item.manufacturer || '未录入厂家' }}</span>
+              </div>
+              <span :class="['status-pill', item.status === 'inactive' ? 'inactive' : '']">
                 {{ statusText(item.status) }}
-              </text>
-            </view>
+              </span>
+            </div>
 
-            <view class="clothing-metrics">
-              <view class="metric-item">
-                <text class="metric-value">{{ item.batchCount || 0 }}</text>
-                <text class="metric-label">批次</text>
-              </view>
-              <view class="metric-item">
-                <text class="metric-value">{{ item.garmentCount || 0 }}</text>
-                <text class="metric-label">SN</text>
-              </view>
-              <view class="metric-item wide-metric">
-                <text class="metric-value">{{ formatDateTime(item.updatedAt) }}</text>
-                <text class="metric-label">最近更新</text>
-              </view>
-            </view>
+            <div class="clothing-metrics">
+              <div class="metric-item">
+                <span class="metric-value">{{ item.batchCount || 0 }}</span>
+                <span class="metric-label">批次</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-value">{{ item.garmentCount || 0 }}</span>
+                <span class="metric-label">SN</span>
+              </div>
+              <div class="metric-item wide-metric">
+                <span class="metric-value">{{ formatDateTime(item.updatedAt) }}</span>
+                <span class="metric-label">最近更新</span>
+              </div>
+            </div>
 
-            <view class="clothing-meta">
-              <view class="meta-row standard-meta">
-                <text class="meta-label">执行标准：</text>
-                <view v-if="splitStandardList(item.standard).length > 1" class="standard-list">
-                  <text
+            <div class="clothing-meta">
+              <div class="meta-row standard-meta">
+                <span class="meta-label">执行标准：</span>
+                <div v-if="splitStandardList(item.standard).length > 1" class="standard-list">
+                  <span
                     v-for="(standard, index) in splitStandardList(item.standard)"
                     :key="`${standard}-${index}`"
                     class="standard-chip"
                   >
                     {{ standard }}
-                  </text>
-                </view>
-                <text v-else>{{ standardDisplayText(item.standard) || '未录入' }}</text>
-              </view>
-              <text>安全类别：{{ item.safetyCategory || '未录入' }}</text>
-              <text>质量等级：{{ item.grade || '未录入' }}</text>
-              <text>面料：{{ item.fabric || '未录入' }}</text>
-            </view>
+                  </span>
+                </div>
+                <span v-else>{{ standardDisplayText(item.standard) || '未录入' }}</span>
+              </div>
+              <span>安全类别：{{ item.safetyCategory || '未录入' }}</span>
+              <span>质量等级：{{ item.grade || '未录入' }}</span>
+              <span>面料：{{ item.fabric || '未录入' }}</span>
+            </div>
 
-            <view class="clothing-footer">
-              <text class="footer-hint">
+            <div class="clothing-footer">
+              <span class="footer-hint">
                 {{ item.batchCount ? '可继续管理批次和 SN' : '还没有批次，进入详情生成 SN' }}
-              </text>
+              </span>
               <button class="secondary-button small-button" @click.stop="goDetail(item.id)">
                 进入详情
               </button>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-  </view>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   clearToken,
   createClothing,
-  getToken,
+  FRONTEND_BASE_URL,
   listClothes
-} from '../../utils/api.js';
+} from '../utils/api.js';
 
 const emptyClothingForm = {
   productName: '',
@@ -240,6 +239,7 @@ const showCreatePanel = ref(false);
 const formMessage = ref('');
 const listMessage = ref('');
 const lastCreatedClothing = ref(null);
+const router = useRouter();
 
 const summaryCards = computed(() => {
   const activeCount = clothes.value.filter((item) => item.status !== 'inactive').length;
@@ -254,14 +254,7 @@ const summaryCards = computed(() => {
   ];
 });
 
-onLoad(() => {
-  if (!getToken()) {
-    uni.redirectTo({
-      url: '/pages/admin/login'
-    });
-    return;
-  }
-
+onMounted(() => {
   loadClothes();
 });
 
@@ -293,10 +286,7 @@ async function saveClothing() {
     await loadClothes();
 
     if (response.clothing?.id) {
-      uni.pageScrollTo({
-        scrollTop: 0,
-        duration: 160
-      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   } catch (error) {
     handleAuthError(error);
@@ -342,67 +332,59 @@ function standardDisplayText(value) {
 }
 
 function goDetail(id) {
-  uni.navigateTo({
-    url: `/pages/admin/clothing-detail?id=${encodeURIComponent(id)}`
-  });
+  router.push(`/clothes/${encodeURIComponent(id)}`);
 }
 
 function handleAuthError(error) {
   if (error.statusCode === 401) {
     clearToken();
-    uni.redirectTo({
-      url: '/pages/admin/login'
-    });
+    router.replace('/login');
   }
 }
 
 function logout() {
   clearToken();
-  uni.redirectTo({
-    url: '/pages/admin/login'
-  });
+  router.replace('/login');
 }
 
 function goHome() {
-  uni.reLaunch({
-    url: '/pages/index/index'
-  });
+  window.open(FRONTEND_BASE_URL, '_blank', 'noopener,noreferrer');
 }
 </script>
 
 <style scoped>
 .admin-page {
-  padding: 28rpx;
+  padding: 14px;
 }
 
 .admin-topbar {
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
+  gap: 12px;
   max-width: 1320px;
-  margin: 0 auto 26rpx;
+  margin: 0 auto 13px;
 }
 
 .eyebrow {
   display: block;
   color: #746e65;
-  font-size: 22rpx;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .admin-title {
   display: block;
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #121212;
-  font-size: 42rpx;
+  font-size: 21px;
   font-weight: 680;
 }
 
 .admin-subtitle {
   display: block;
-  margin-top: 10rpx;
+  margin-top: 5px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -411,12 +393,12 @@ function goHome() {
 .editor-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16rpx;
+  gap: 8px;
 }
 
 .admin-workspace {
   display: grid;
-  gap: 24rpx;
+  gap: 12px;
   max-width: 1320px;
   margin: 0 auto;
 }
@@ -424,7 +406,7 @@ function goHome() {
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
+  gap: 7px;
 }
 
 .summary-card,
@@ -432,12 +414,12 @@ function goHome() {
 .create-panel,
 .next-step-banner {
   border: 1px solid #ddd6cc;
-  border-radius: 8rpx;
+  border-radius: 4px;
   background: #fffdf9;
 }
 
 .summary-card {
-  padding: 22rpx;
+  padding: 11px;
 }
 
 .summary-value,
@@ -457,71 +439,71 @@ function goHome() {
 
 .summary-value {
   color: #141414;
-  font-size: 38rpx;
+  font-size: 19px;
   font-weight: 720;
 }
 
 .summary-label {
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 .records-panel {
-  padding: 22rpx;
+  padding: 11px;
 }
 
 .records-heading {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
-  margin-bottom: 20rpx;
+  gap: 9px;
+  margin-bottom: 10px;
 }
 
 .toolbar-meta {
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 .search-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12rpx;
-  margin-bottom: 20rpx;
+  gap: 6px;
+  margin-bottom: 10px;
   align-items: center;
 }
 
 .create-panel {
   display: grid;
-  gap: 22rpx;
-  margin-bottom: 20rpx;
-  padding: 22rpx;
+  gap: 11px;
+  margin-bottom: 10px;
+  padding: 11px;
   background: #fbf8f2;
 }
 
 .create-panel-head {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 9px;
 }
 
 .panel-title {
   color: #151515;
-  font-size: 30rpx;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .panel-copy {
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .form-grid {
   display: grid;
-  gap: 20rpx;
+  gap: 10px;
 }
 
 .wide-field {
@@ -529,83 +511,83 @@ function goHome() {
 }
 
 .standard-textarea {
-  min-height: 186rpx;
+  min-height: 93px;
   font-family: "SFMono-Regular", Consolas, monospace;
 }
 
 .small-button {
-  min-height: 74rpx;
-  padding: 0 20rpx;
-  font-size: 24rpx;
-  line-height: 74rpx;
+  min-height: 37px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 37px;
   white-space: nowrap;
 }
 
 .message-text {
   color: #8d3c22;
-  font-size: 24rpx;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .panel-message {
   display: block;
-  margin-bottom: 18rpx;
+  margin-bottom: 9px;
 }
 
 .next-step-banner {
   display: grid;
-  gap: 18rpx;
-  margin-bottom: 20rpx;
-  padding: 22rpx;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 11px;
   border-color: #cfdcc8;
   background: #fbfff8;
 }
 
 .next-step-title {
   color: #223d1f;
-  font-size: 28rpx;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .next-step-copy {
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #5f7558;
-  font-size: 24rpx;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .empty-state {
   display: grid;
   justify-items: center;
-  gap: 14rpx;
-  padding: 48rpx 20rpx;
+  gap: 7px;
+  padding: 24px 10px;
   color: #746e65;
   text-align: center;
 }
 
 .empty-title {
   color: #151515;
-  font-size: 30rpx;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .empty-copy {
   color: #746e65;
-  font-size: 24rpx;
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .clothing-list {
   display: grid;
-  gap: 18rpx;
+  gap: 9px;
 }
 
 .clothing-card {
   display: grid;
-  gap: 18rpx;
-  padding: 22rpx;
+  gap: 9px;
+  padding: 11px;
   border: 1px solid #e3dcd2;
-  border-radius: 8rpx;
+  border-radius: 4px;
   background: #fbf8f2;
 }
 
@@ -613,33 +595,33 @@ function goHome() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16rpx;
+  gap: 8px;
 }
 
 .clothing-name {
   display: block;
   color: #141414;
-  font-size: 32rpx;
+  font-size: 16px;
   font-weight: 650;
 }
 
 .clothing-subtitle {
   display: block;
-  margin-top: 8rpx;
+  margin-top: 4px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 .clothing-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12rpx;
+  gap: 6px;
 }
 
 .metric-item {
-  padding: 16rpx;
+  padding: 8px;
   border: 1px solid #e5ded4;
-  border-radius: 8rpx;
+  border-radius: 4px;
   background: #fffdf9;
 }
 
@@ -649,21 +631,21 @@ function goHome() {
 
 .metric-value {
   color: #171717;
-  font-size: 28rpx;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .metric-label {
-  margin-top: 6rpx;
+  margin-top: 3px;
   color: #746e65;
-  font-size: 22rpx;
+  font-size: 11px;
 }
 
 .clothing-meta {
   display: grid;
-  gap: 8rpx;
+  gap: 4px;
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 .meta-row {
@@ -673,7 +655,7 @@ function goHome() {
 .standard-meta {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 6rpx;
+  gap: 3px;
   align-items: start;
 }
 
@@ -685,32 +667,32 @@ function goHome() {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 8rpx;
+  gap: 4px;
 }
 
 .standard-chip {
   max-width: 100%;
-  padding: 4rpx 12rpx;
+  padding: 2px 6px;
   border: 1px solid #d8dfd1;
-  border-radius: 999rpx;
+  border-radius: 499.5px;
   background: #f7fbf4;
   color: #415f37;
-  font-size: 22rpx;
+  font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .clothing-footer {
   display: grid;
-  gap: 14rpx;
+  gap: 7px;
   align-items: center;
   color: #5f5a52;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 .footer-hint {
   color: #6b665f;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 @media (min-width: 980px) {

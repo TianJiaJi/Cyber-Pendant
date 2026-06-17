@@ -14,12 +14,11 @@ Cyber-Pendant 是一个数字服装吊牌系统。用户可以扫描二维码或
 ## 项目结构
 ```
 cyber-pendant/
-├── client/          # Uni-app Vue 3 H5 前端（为未来迁移微信小程序准备）
+├── client/          # Uni-app Vue 3 用户端（H5 / 微信小程序）
 │   ├── src/
 │   │   ├── pages/           # 页面组件
 │   │   │   ├── index/       # 首页（扫码/输入入口）
 │   │   │   ├── garment/     # 吊牌详情页
-│   │   │   └── admin/       # 管理后台（登录/衣服主档/衣服详情）
 │   │   ├── utils/           # 工具函数
 │   │   │   ├── api.js       # API 请求封装
 │   │   │   └── scanner.js   # 扫码功能
@@ -29,6 +28,7 @@ cyber-pendant/
 │   ├── .env.example         # 环境变量示例
 │   └── package.json
 ├── server/         # Node.js API 服务器（使用内置 node:sqlite）
+│   ├── admin/              # 独立 Vue 管理台，构建后由后端托管
 │   ├── src/
 │   │   ├── index.js         # 服务入口
 │   │   ├── api.js           # HTTP 路由和请求处理
@@ -49,6 +49,7 @@ cyber-pendant/
 ```bash
 npm --prefix server install
 npm --prefix client install
+npm --prefix server/admin install
 ```
 
 ### 2. 配置环境变量
@@ -65,6 +66,8 @@ cp server/.env.example server/.env
 - `PORT` - 后端端口（默认 8787）
 - `ADMIN_USERNAME` - 管理员用户名（默认 admin）
 - `FRONTEND_BASE_URL` - 前端地址，用于生成二维码链接（默认 http://localhost:5173）
+- `ADMIN_BASE_PATH` - 后端托管管理台路径（默认 /admin）
+- `ADMIN_STATIC_DIR` - 管理台构建产物目录（默认 admin/dist）
 - `CORS_ORIGIN` - CORS 允许的源（默认 *）
 
 ### 3. 启动后端
@@ -75,7 +78,7 @@ npm run dev:server
 
 后端将运行在 `http://localhost:8787`
 
-### 4. 启动前端（新开终端）
+### 4. 启动用户端（新开终端）
 
 ```bash
 npm run dev:client
@@ -83,15 +86,29 @@ npm run dev:client
 
 前端 H5 页面将运行在 `http://localhost:5173`
 
-## 后台地址
+### 5. 启动管理台开发服务器（可选，新开终端）
 
-本地开发后台登录地址：
-
-```text
-http://localhost:5173/#/pages/admin/login
+```bash
+npm run dev:admin
 ```
 
-登录成功后会进入衣服主档后台。前台用户查询页不显示后台入口，需要手动输入后台地址访问。
+管理台开发服务器将运行在 `http://localhost:5174`，并通过 Vite proxy 调用 `http://localhost:8787/api`。
+
+## 后台地址
+
+生产或本地构建后，后端默认托管后台地址：
+
+```text
+http://localhost:8787/admin/
+```
+
+如需让后端托管最新管理台，请先运行：
+
+```bash
+npm run build:admin
+```
+
+登录成功后会进入衣服主档后台。用户端代码不再包含后台页面，便于后续单独打包微信小程序。
 
 ## 默认账号
 
@@ -111,10 +128,13 @@ CP20260615DEMO01
 ```bash
 # 启动开发服务器
 npm run dev:server   # 后端（带 --watch 自动重启）
-npm run dev:client   # 前端 H5
+npm run dev:client   # 用户端 H5
+npm run dev:admin    # 管理台 Web
 
 # 构建生产版本
-npm run build:client # 构建 H5 静态文件
+npm run build:client # 构建用户端 H5 静态文件
+npm run build:admin  # 构建后端托管的管理台静态文件
+npm --prefix client run build:mp-weixin # 构建微信小程序用户端
 
 # 运行测试
 npm test            # 运行后端测试
@@ -133,8 +153,12 @@ node --test server/test/*.test.js
 
 ### 前端
 - **框架**：Uni-app Vue 3
-- **目标平台**：H5（当前）/ 微信小程序（已准备）
+- **目标平台**：H5 / 微信小程序
 - **扫码**：html5-qrcode（H5）/ uni.scanCode（小程序）
+
+### 管理台
+- **框架**：Vue 3 + Vite + Vue Router
+- **托管方式**：构建到 `server/admin/dist` 后由后端在 `ADMIN_BASE_PATH` 下提供
 - **表格导出**：xlsx
 
 ## API 接口
@@ -180,6 +204,8 @@ CP{YYYYMMDD}{6位随机字符}
 | `PORT` | 监听端口 | 8787 |
 | `DATABASE_PATH` | SQLite 数据库路径 | ../data/cyber-pendant.sqlite |
 | `FRONTEND_BASE_URL` | 前端地址（二维码链接） | http://localhost:5173 |
+| `ADMIN_BASE_PATH` | 管理台后端托管路径 | /admin |
+| `ADMIN_STATIC_DIR` | 管理台静态文件目录 | admin/dist |
 | `CORS_ORIGIN` | CORS 允许的源 | * |
 | `TOKEN_SECRET` | JWT 签名密钥 | **必须设置** |
 | `ADMIN_USERNAME` | 管理员用户名 | admin |
@@ -190,6 +216,13 @@ CP{YYYYMMDD}{6位随机字符}
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VITE_API_BASE_URL` | API 服务地址 | http://localhost:8787 |
+
+### 管理台（server/admin/.env.local，仅独立开发时需要）
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `VITE_API_BASE_URL` | API 服务地址；不设置时使用同源 `/api` | 空 |
+| `VITE_FRONTEND_BASE_URL` | 用户端地址，用于导出详情链接 | http://localhost:5173 |
 
 ## 数据库
 

@@ -13,27 +13,6 @@
         "navigationBarTitleText": "吊牌详情",
         "navigationStyle": "custom"
       }
-    },
-    {
-      "path": "pages/admin/login",
-      "style": {
-        "navigationBarTitleText": "后台登录",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/admin/dashboard",
-      "style": {
-        "navigationBarTitleText": "管理后台",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/admin/clothing-detail",
-      "style": {
-        "navigationBarTitleText": "衣服详情",
-        "navigationStyle": "custom"
-      }
     }
   ],
   "globalStyle": {

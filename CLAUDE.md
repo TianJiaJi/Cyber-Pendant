@@ -8,20 +8,23 @@ Cyber-Pendant is a digital garment hang tag system. Users scan QR codes or enter
 
 - **`client/`**: Uni-app Vue 3 H5 frontend (WeChat Mini Program ready)
 - **`server/`**: Node.js API using built-in `node:sqlite`
+- **`server/admin/`**: standalone Vue 3 + Vite admin console served by the backend after build
 - **`data/`**: Local SQLite database (runtime-generated, gitignored)
 
 ## Commands
 
 ```bash
 # Install all dependencies
-npm --prefix server install && npm --prefix client install
+npm --prefix server install && npm --prefix client install && npm --prefix server/admin install
 
 # Development (run in separate terminals)
 npm run dev:server   # node --watch server/src/index.js
 npm run dev:client   # uni -p h5 (H5) or uni -p mp-weixin (Mini Program)
+npm run dev:admin    # Vite admin console on port 5174, proxies /api to backend
 
 # Build
 npm run build:client # uni build -p h5
+npm run build:admin  # Vite build to server/admin/dist for backend hosting
 
 # Test
 npm test             # node --test server/test/*.test.js
@@ -43,12 +46,19 @@ API design (no framework):
 - Manual routing via `pathname` patterns in `route()` function
 - `HttpError` class for error responses
 - CORS configurable via `CORS_ORIGIN` env var
+- Admin SPA static hosting is configurable with `ADMIN_BASE_PATH` (default `/admin`) and `ADMIN_STATIC_DIR` (default `server/admin/dist`)
 
 ### Client (Uni-app Vue 3)
 
 - `src/pages.json`: Route registry (Uni-app convention)
-- `src/utils/api.js`: Fetch wrapper, token storage in `uni.getStorageSync()`
+- `src/utils/api.js`: Public garment lookup/binding API wrapper only
 - `src/utils/scanner.js`: QR scanning; handles WeChat Mini Program vs H5 divergence via conditional compilation (`#ifdef MP-WEIXIN`)
+
+### Admin Console (Vue 3 + Vite)
+
+- `server/admin/src/router.js`: hash router (`#/login`, `#/dashboard`, `#/clothes/:id`)
+- `server/admin/src/utils/api.js`: admin API wrapper, token storage in `localStorage`
+- Built assets are served by the backend at `ADMIN_BASE_PATH`
 
 ## Environment Setup
 

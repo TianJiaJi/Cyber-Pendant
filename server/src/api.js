@@ -1,4 +1,6 @@
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
+import path from 'node:path';
 import QRCode from 'qrcode';
 import { createToken, verifyPassword, verifyToken } from './auth.js';
 import { createConfig } from './config.js';
@@ -140,6 +142,166 @@ function readPositiveInteger(value) {
 
 function wantsHardDelete(searchParams) {
   return searchParams.get('hard') === '1' || searchParams.get('hard') === 'true';
+}
+
+const MIME_TYPES = new Map([
+  ['.css', 'text/css; charset=utf-8'],
+  ['.csv', 'text/csv; charset=utf-8'],
+  ['.gif', 'image/gif'],
+  ['.html', 'text/html; charset=utf-8'],
+  ['.ico', 'image/x-icon'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.map', 'application/json; charset=utf-8'],
+  ['.png', 'image/png'],
+  ['.svg', 'image/svg+xml; charset=utf-8'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.webp', 'image/webp'],
+  ['.woff', 'font/woff'],
+  ['.woff2', 'font/woff2']
+]);
+
+function contentTypeFor(filePath) {
+  return MIME_TYPES.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream';
+}
+
+function isWithinDirectory(rootDir, filePath) {
+  const relative = path.relative(rootDir, filePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeStaticPath(rootDir, requestPath) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(requestPath);
+  } catch {
+    return null;
+  }
+
+  if (decoded.includes('\0')) {
+    return null;
+  }
+
+  const filePath = path.resolve(rootDir, decoded || 'index.html');
+  return isWithinDirectory(rootDir, filePath) ? filePath : null;
+}
+
+function adminRelativePath(pathname, adminBasePath) {
+  if (adminBasePath === '/') {
+    if (pathname === '/api' || pathname.startsWith('/api/')) {
+      return null;
+    }
+
+    return pathname.replace(/^\/+/, '') || 'index.html';
+  }
+
+  if (pathname === adminBasePath) {
+    return '';
+  }
+
+  if (!pathname.startsWith(`${adminBasePath}/`)) {
+    return null;
+  }
+
+  return pathname.slice(adminBasePath.length + 1) || 'index.html';
+}
+
+function sendAdminIndex(req, res, context) {
+  const indexPath = path.join(context.config.adminStaticDir, 'index.html');
+
+  if (!existsSync(indexPath)) {
+    return false;
+  }
+
+  const runtimeConfig = {
+    apiBaseUrl: '',
+    frontendBaseUrl: context.config.frontendBaseUrl,
+    adminBasePath: context.config.adminBasePath
+  };
+  const configScript = `<script>window.__CYBER_PENDANT_ADMIN_CONFIG__=${JSON.stringify(runtimeConfig).replace(/</g, '\\u003c')};</script>`;
+  const html = readFileSync(indexPath, 'utf8');
+  const body = html.includes('</head>')
+    ? html.replace('</head>', `  ${configScript}\n  </head>`)
+    : `${configScript}\n${html}`;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+
+  if (req.method === 'HEAD') {
+    res.end();
+    return true;
+  }
+
+  res.end(body);
+  return true;
+}
+
+function sendStaticFile(req, res, filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  const isHashedAsset = extension && !['.html'].includes(extension);
+
+  res.writeHead(200, {
+    'Content-Type': contentTypeFor(filePath),
+    'Cache-Control': isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-store'
+  });
+
+  if (req.method === 'HEAD') {
+    res.end();
+    return true;
+  }
+
+  createReadStream(filePath)
+    .on('error', () => {
+      res.destroy();
+    })
+    .pipe(res);
+  return true;
+}
+
+function handleAdminStatic(req, res, context, pathname) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return false;
+  }
+
+  const relativePath = adminRelativePath(pathname, context.config.adminBasePath);
+  if (relativePath === null) {
+    return false;
+  }
+
+  if (relativePath === '') {
+    const location =
+      context.config.adminBasePath === '/' ? '/' : `${context.config.adminBasePath}/`;
+    res.writeHead(308, { Location: location });
+    res.end();
+    return true;
+  }
+
+  const filePath = safeStaticPath(context.config.adminStaticDir, relativePath);
+  if (!filePath) {
+    throw new HttpError(404, '管理后台资源不存在');
+  }
+
+  if (existsSync(filePath) && statSync(filePath).isFile()) {
+    if (path.basename(filePath) === 'index.html') {
+      return sendAdminIndex(req, res, context);
+    }
+
+    return sendStaticFile(req, res, filePath);
+  }
+
+  if (path.extname(relativePath)) {
+    throw new HttpError(404, '管理后台资源不存在');
+  }
+
+  if (sendAdminIndex(req, res, context)) {
+    return true;
+  }
+
+  throw new HttpError(404, '管理后台尚未构建，请先运行 npm run build:admin');
 }
 
 function batchWithGarments(context, batch) {
@@ -703,6 +865,10 @@ async function route(req, res, context) {
   const qrSn = parsePathSn(pathname, '/api/qrcode/');
   if (qrSn && req.method === 'GET') {
     await handleQrCode(req, res, context, qrSn, searchParams);
+    return;
+  }
+
+  if (handleAdminStatic(req, res, context, pathname)) {
     return;
   }
 

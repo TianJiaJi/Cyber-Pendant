@@ -12,6 +12,15 @@ function resolveProjectPath(value, fallback) {
   return path.isAbsolute(target) ? target : path.resolve(serverDir, target);
 }
 
+function normalizeBasePath(value, fallback) {
+  const raw = String(value || fallback || '').trim();
+  if (!raw || raw === '/') {
+    return '/';
+  }
+
+  return `/${raw.replace(/^\/+|\/+$/g, '')}`;
+}
+
 function stripEnvValue(value) {
   const trimmed = value.trim();
 
@@ -66,6 +75,14 @@ export function createConfig(overrides = {}) {
     ),
     frontendBaseUrl:
       overrides.frontendBaseUrl || env.FRONTEND_BASE_URL || 'http://localhost:5173',
+    adminBasePath: normalizeBasePath(
+      overrides.adminBasePath || env.ADMIN_BASE_PATH,
+      '/admin'
+    ),
+    adminStaticDir: resolveProjectPath(
+      overrides.adminStaticDir || env.ADMIN_STATIC_DIR,
+      path.join(serverDir, 'admin', 'dist')
+    ),
     corsOrigin: overrides.corsOrigin || env.CORS_ORIGIN || '*',
     tokenSecret,
     usingEphemeralTokenSecret: !overrides.tokenSecret && !env.TOKEN_SECRET,

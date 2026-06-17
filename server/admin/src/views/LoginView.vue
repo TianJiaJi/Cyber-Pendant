@@ -1,52 +1,46 @@
 <template>
-  <view class="page-shell login-page">
-    <view class="login-panel">
-      <text class="eyebrow">ADMIN CONSOLE</text>
-      <text class="login-title">Cyber-Pendant 管理后台</text>
-      <text class="muted-text">录入吊牌信息，生成 SN 码和二维码。</text>
+  <div class="page-shell login-page">
+    <div class="login-panel">
+      <span class="eyebrow">ADMIN CONSOLE</span>
+      <span class="login-title">Cyber-Pendant 管理后台</span>
+      <span class="muted-text">录入吊牌信息，生成 SN 码和二维码。</span>
 
-      <view class="login-form">
-        <view>
-          <text class="field-label">用户名</text>
+      <div class="login-form">
+        <div>
+          <span class="field-label">用户名</span>
           <input v-model="username" class="form-input" placeholder="admin" />
-        </view>
-        <view>
-          <text class="field-label">密码</text>
+        </div>
+        <div>
+          <span class="field-label">密码</span>
           <input
             v-model="password"
             class="form-input"
-            password
+            type="password"
             placeholder="admin123456"
-            @confirm="submit"
+            @keyup.enter="submit"
           />
-        </view>
+        </div>
         <button class="primary-button" :disabled="loading" @click="submit">
           {{ loading ? '登录中' : '登录后台' }}
         </button>
         <button class="ghost-button" @click="goHome">返回前台</button>
-        <text v-if="message" class="message-text">{{ message }}</text>
-      </view>
-    </view>
-  </view>
+        <span v-if="message" class="message-text">{{ message }}</span>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
 import { ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
-import { getToken, login, saveToken } from '../../utils/api.js';
+import { useRoute, useRouter } from 'vue-router';
+import { FRONTEND_BASE_URL, login, saveToken } from '../utils/api.js';
 
 const username = ref('admin');
 const password = ref('');
 const loading = ref(false);
 const message = ref('');
-
-onLoad(() => {
-  if (getToken()) {
-    uni.redirectTo({
-      url: '/pages/admin/dashboard'
-    });
-  }
-});
+const route = useRoute();
+const router = useRouter();
 
 async function submit() {
   message.value = '';
@@ -60,9 +54,7 @@ async function submit() {
   try {
     const response = await login(username.value.trim(), password.value);
     saveToken(response.token);
-    uni.redirectTo({
-      url: '/pages/admin/dashboard'
-    });
+    router.replace(String(route.query.redirect || '/dashboard'));
   } catch (error) {
     message.value = error.message || '登录失败。';
   } finally {
@@ -71,9 +63,7 @@ async function submit() {
 }
 
 function goHome() {
-  uni.reLaunch({
-    url: '/pages/index/index'
-  });
+  window.open(FRONTEND_BASE_URL, '_blank', 'noopener,noreferrer');
 }
 </script>
 
@@ -83,42 +73,42 @@ function goHome() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  padding: 36rpx;
+  padding: 18px;
 }
 
 .login-panel {
   width: 100%;
-  max-width: 760rpx;
-  padding: 42rpx;
+  max-width: 380px;
+  padding: 21px;
   border: 1px solid #ddd6cc;
-  border-radius: 8rpx;
+  border-radius: 4px;
   background: #fffdf9;
 }
 
 .eyebrow {
   display: block;
   color: #746e65;
-  font-size: 22rpx;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .login-title {
   display: block;
-  margin: 24rpx 0 14rpx;
+  margin: 12px 0 7px;
   color: #121212;
-  font-size: 44rpx;
+  font-size: 22px;
   font-weight: 680;
 }
 
 .login-form {
   display: grid;
-  gap: 22rpx;
-  margin-top: 36rpx;
+  gap: 11px;
+  margin-top: 18px;
 }
 
 .message-text {
   color: #8d3c22;
-  font-size: 24rpx;
+  font-size: 12px;
 }
 
 @media (min-width: 760px) {

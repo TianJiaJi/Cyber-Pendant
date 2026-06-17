@@ -6,7 +6,9 @@
   "scripts": {
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev:h5",
+    "dev:admin": "npm --prefix server/admin run dev",
     "build:client": "npm --prefix client run build:h5",
+    "build:admin": "npm --prefix server/admin run build",
     "test": "npm --prefix server test"
   },
   "engines": {

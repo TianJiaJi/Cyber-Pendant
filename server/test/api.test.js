@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -262,6 +262,56 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
 
   const missingLookup = await fetch(`${app.baseUrl}/api/garments/${sn}`);
   assert.equal(missingLookup.status, 404);
+});
+
+test('serves admin console from configurable backend path', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cyber-pendant-admin-'));
+  const adminStaticDir = path.join(dir, 'admin-dist');
+  mkdirSync(path.join(adminStaticDir, 'assets'), { recursive: true });
+  writeFileSync(
+    path.join(adminStaticDir, 'index.html'),
+    '<!doctype html><html><head><title>Admin</title></head><body><div id="app">Admin Shell</div></body></html>'
+  );
+  writeFileSync(path.join(adminStaticDir, 'assets', 'app.js'), 'console.log("admin");');
+
+  const app = await startTestServer({
+    adminBasePath: '/console',
+    adminStaticDir,
+    frontendBaseUrl: 'https://example.test/h5'
+  });
+  t.after(app.close);
+
+  const health = await fetch(`${app.baseUrl}/api/health`);
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).ok, true);
+
+  const redirect = await fetch(`${app.baseUrl}/console`, { redirect: 'manual' });
+  assert.equal(redirect.status, 308);
+  assert.equal(redirect.headers.get('location'), '/console/');
+
+  const index = await fetch(`${app.baseUrl}/console/`);
+  assert.equal(index.status, 200);
+  assert.match(index.headers.get('content-type'), /^text\/html/);
+  const html = await index.text();
+  assert.match(html, /Admin Shell/);
+  assert.match(html, /window\.__CYBER_PENDANT_ADMIN_CONFIG__/);
+  assert.match(html, /https:\/\/example\.test\/h5/);
+
+  const asset = await fetch(`${app.baseUrl}/console/assets/app.js`);
+  assert.equal(asset.status, 200);
+  assert.match(asset.headers.get('content-type'), /^text\/javascript/);
+  assert.match(asset.headers.get('cache-control'), /max-age=31536000/);
+  assert.equal(await asset.text(), 'console.log("admin");');
+
+  const spaFallback = await fetch(`${app.baseUrl}/console/clothes/123`);
+  assert.equal(spaFallback.status, 200);
+  assert.match(await spaFallback.text(), /Admin Shell/);
+
+  const traversal = await fetch(`${app.baseUrl}/console/%2e%2e/src/config.js`);
+  assert.equal(traversal.status, 404);
+
+  const missingAsset = await fetch(`${app.baseUrl}/console/assets/missing.js`);
+  assert.equal(missingAsset.status, 404);
 });
 
 test('clothes CRUD, batch SN creation, filters, and live upper-layer edits', async (t) => {

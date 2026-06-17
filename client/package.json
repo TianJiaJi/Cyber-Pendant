@@ -15,8 +15,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-alpha-1000920260615733",
     "cyber-pendant": "file:..",
     "html5-qrcode": "latest",
-    "vue": "3.5.35",
-    "xlsx": "^0.18.5"
+    "vue": "3.5.35"
   },
   "devDependencies": {
     "@dcloudio/types": "3.4.31",

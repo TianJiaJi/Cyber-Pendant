@@ -2,6 +2,15 @@
 
 Cyber-Pendant 是一个数字服装吊牌系统。用户可以扫描二维码或输入 SN 码查看服装详情，管理员可以登录后台管理记录并生成 SN/二维码。
 
+## 数据架构
+
+后台数据按三层管理：
+1. `clothes` 衣服主档：衣服名称、面料、执行标准、安全类别、等级、厂家、厂家地址、洗护说明、备注、状态。
+2. `garment_batches` 生成批次：归属某件衣服，保存款号、颜色、尺码、生产批次、生产日期、批次备注、状态。
+3. `garments` SN 明细：每个吊牌一个唯一 SN，关联衣服和批次，并保留自身状态。
+
+扫码详情由衣服主档、批次和 SN 三层组合生成；编辑衣服或批次后，已生成 SN 的展示信息会同步更新。
+
 ## 项目结构
 
 ```
@@ -11,7 +20,7 @@ cyber-pendant/
 │   │   ├── pages/           # 页面组件
 │   │   │   ├── index/       # 首页（扫码/输入入口）
 │   │   │   ├── garment/     # 吊牌详情页
-│   │   │   └── admin/       # 管理后台（登录/仪表盘）
+│   │   │   └── admin/       # 管理后台（登录/衣服主档/衣服详情）
 │   │   ├── utils/           # 工具函数
 │   │   │   ├── api.js       # API 请求封装
 │   │   │   └── scanner.js   # 扫码功能
@@ -75,6 +84,16 @@ npm run dev:client
 
 前端 H5 页面将运行在 `http://localhost:5173`
 
+## 后台地址
+
+本地开发后台登录地址：
+
+```text
+http://localhost:5173/#/pages/admin/login
+```
+
+登录成功后会进入衣服主档后台。前台用户查询页不显示后台入口，需要手动输入后台地址访问。
+
 ## 默认账号
 
 - 用户名：`admin`
@@ -117,16 +136,27 @@ node --test server/test/*.test.js
 - **框架**：Uni-app Vue 3
 - **目标平台**：H5（当前）/ 微信小程序（已准备）
 - **扫码**：html5-qrcode（H5）/ uni.scanCode（小程序）
+- **表格导出**：xlsx
 
 ## API 接口
 
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
 | POST | `/api/auth/login` | 管理员登录 | ❌ |
-| GET | `/api/garments` | 吊牌列表（支持 `?q=` 搜索） | ✅ |
-| POST | `/api/garments` | 创建吊牌 | ✅ |
+| GET | `/api/clothes` | 衣服主档列表（支持 `?q=` 搜索，返回批次数和 SN 数） | ✅ |
+| POST | `/api/clothes` | 新增衣服主档 | ✅ |
+| GET | `/api/clothes/{id}` | 衣服主档详情 | ✅ |
+| PUT | `/api/clothes/{id}` | 更新衣服主档 | ✅ |
+| DELETE | `/api/clothes/{id}?hard=0\|1` | 停用或真删除衣服；真删除级联批次和 SN | ✅ |
+| GET | `/api/clothes/{id}/batches` | 某件衣服下的批次和 SN 明细 | ✅ |
+| POST | `/api/clothes/{id}/batches` | 创建新批次并批量生成唯一 SN | ✅ |
+| PUT | `/api/batches/{id}` | 更新批次信息或启用批次 | ✅ |
+| DELETE | `/api/batches/{id}?hard=0\|1` | 停用或真删除批次；真删除级联 SN | ✅ |
+| GET | `/api/garments` | SN 列表（支持 `?q=`、`?clothingId=`、`?batchId=`） | ✅ |
+| POST | `/api/garments` | 兼容旧流程：创建单个吊牌 | ✅ |
 | GET | `/api/garments/{sn}` | 查询吊牌详情 | ❌ |
-| PUT | `/api/garments/{sn}` | 更新吊牌 | ✅ |
+| PUT | `/api/garments/{sn}` | 更新 SN 状态 | ✅ |
+| DELETE | `/api/garments/{sn}?hard=0\|1` | 停用或真删除单个 SN | ✅ |
 | POST | `/api/sn/generate` | 生成唯一 SN 码 | ✅ |
 | GET | `/api/qrcode/{sn}` | 获取二维码图片（`?type=sn|url`） | ❌ |
 
@@ -165,11 +195,22 @@ CP{YYYYMMDD}{6位随机字符}
 ## 数据库
 
 首次运行时，数据库会自动创建并：
-1. 创建 `admins` 和 `garments` 表
+1. 创建 `admins`、`clothes`、`garment_batches`、`garments` 表，并保留 `garment_styles` 兼容旧版本
 2. 如果管理员不存在，根据 `.env` 配置创建默认管理员
 3. 如果吊牌表为空，插入一条演示数据
+4. 旧的 `garment_styles + garments` 数据会自动迁移为 `clothes + garment_batches + garments`
 
 数据库文件位置默认为项目根目录下的 `data/cyber-pendant.sqlite`。
+
+### 删除行为
+
+- 停用是默认安全删除：衣服、批次或 SN 停用后，公开 SN 查询返回 `423`，并带停用记录信息。
+- 真删除使用 `?hard=1`：衣服真删除会级联删除批次和 SN；批次真删除会级联删除 SN；SN 真删除后公开查询返回 `404`。
+- 已印刷二维码只包含 SN 或详情页链接，因此真删除后对应二维码会查不到记录。
+
+### 后台导出
+
+衣服详情页的批次卡片可导出本批 SN，支持 `Excel 表格` 和 `CSV 清单`。导出字段包含衣服名称、款号、颜色、尺码、SN、生产批次、生产日期、详情页链接和二维码链接；Excel 中二维码以链接写入，不嵌入图片。
 
 ## 许可证
 

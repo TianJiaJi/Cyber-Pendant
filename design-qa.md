@@ -5,6 +5,7 @@
 - URL: `http://localhost:5173/#/pages/garment/detail?sn=CP20260615DEMO01`
 - Viewport: `390x844`
 - State: active demo garment, company card collapsed unless noted
+- Query-count screenshot: `/tmp/cyber-pendant-detail-query-count.png`
 - First viewport screenshot: `/tmp/cyber-pendant-detail-mobile-visible.png`
 - Full page screenshot: `/tmp/cyber-pendant-detail-mobile-full.png`
 - Expanded company screenshot: `/tmp/cyber-pendant-detail-mobile-expanded.png`
@@ -15,7 +16,7 @@
 **Findings**
 - No actionable P0/P1/P2 findings.
 - The implementation preserves the reference hierarchy: custom top bar, quality verification section, assurance card, product title, paper-style tag card with real QR code, production enterprise card, binding card, and support footer.
-- The implementation intentionally omits fake query count and first-query time, matching the approved UI-only scope.
+- The implementation shows a real persisted query count in the assurance card and still omits unsupported first-query time.
 - The page is taller than the reference because it renders the real demo garment fields, including grade, wash care, and longer fabric content. This is acceptable for the current scope and avoids hiding true product data.
 
 **Required Fidelity Surfaces**
@@ -30,17 +31,20 @@
 - Added real QR rendering through `qrcodeUrl(sn, 'url')`.
 - Added company-card expansion and bind-button toast.
 - Reworked loading and error states to use the new visual system.
+- Added persisted public lookup counting and displayed `当前查询次数 X 次`.
 
 **Validation**
 - `npm run build:h5` passed.
+- `npm test` passed.
 - Active route verified at `390x844`; no horizontal overflow.
+- Query-count route verified at `390x844`; text matched `当前查询次数 4 次`.
 - Narrow route verified at `320x700`; no horizontal overflow.
 - Missing-SN and not-found states verified with the new top bar and state card.
 - Company expansion verified; manufacturer address appears and action changes to `收起`.
 - Bind button verified; toast text `绑定功能即将开放` appears.
 
 **Follow-up Polish**
-- A future backend pass can add real query count, first-query time, and binding ownership before those UI elements are shown.
+- A future backend pass can add real first-query time and binding ownership before those UI elements are shown.
 - If exact visual mimicry becomes more important than data completeness, the tag card can gain a dedicated printed-tag asset and tighter row grouping.
 
 final result: passed

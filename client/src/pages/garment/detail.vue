@@ -32,12 +32,19 @@
         </view>
 
         <view :class="['assurance-card', isInactive ? 'inactive' : '']">
-          <text class="assurance-title">
-            {{ isInactive ? '该吊牌当前已停用' : '您查询的校服为正品' }}
-          </text>
-          <text class="assurance-copy">
-            {{ isInactive ? errorMessage || '如需确认状态，请联系生产企业。' : '信息来自 Cyber-Pendant 溯源系统' }}
-          </text>
+          <view class="assurance-title">
+            <text>{{ isInactive ? '该吊牌当前已停用' : '您查询的校服为正品' }}</text>
+            <text v-if="!isInactive">，当前查询次数 </text>
+            <text v-if="!isInactive" class="query-count">{{ queryCountText }}</text>
+            <text v-if="!isInactive"> 次</text>
+          </view>
+          <view class="assurance-copy">
+            <text v-if="isInactive">
+              {{ errorMessage || '如需确认状态，请联系生产企业。' }}
+            </text>
+            <text v-if="isInactive">累计查询次数 {{ queryCountText }} 次</text>
+            <text v-else>信息来自 Cyber-Pendant 溯源系统</text>
+          </view>
         </view>
 
         <view class="product-heading">
@@ -134,6 +141,11 @@ const isInactive = computed(() => {
 const qrCodeSrc = computed(() => {
   const current = currentGarment.value;
   return current?.sn ? qrcodeUrl(current.sn, 'url') : '';
+});
+
+const queryCountText = computed(() => {
+  const current = currentGarment.value;
+  return String(Number(current?.queryCount || 0));
 });
 
 const tagFields = computed(() => {
@@ -444,6 +456,12 @@ function handleBind() {
   font-size: 30rpx;
   font-weight: 690;
   line-height: 1.5;
+}
+
+.query-count {
+  color: #5f8f55;
+  font-size: 36rpx;
+  font-weight: 780;
 }
 
 .assurance-copy {

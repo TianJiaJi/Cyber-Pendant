@@ -147,6 +147,7 @@ export function migrateDatabase(db, config) {
       batch_no TEXT,
       production_date TEXT,
       remark TEXT,
+      query_count INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -187,6 +188,7 @@ export function migrateDatabase(db, config) {
   ensureGarmentColumn(db, 'clothing_id');
   ensureGarmentColumn(db, 'batch_id');
   ensureGarmentColumn(db, 'style_id');
+  ensureGarmentQueryCountColumn(db);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_garments_clothing_id ON garments(clothing_id);
@@ -202,6 +204,15 @@ function ensureGarmentColumn(db, columnName) {
   if (!columnExists(db, 'garments', columnName)) {
     db.exec(`ALTER TABLE garments ADD COLUMN ${columnName} INTEGER;`);
   }
+}
+
+function ensureGarmentQueryCountColumn(db) {
+  if (!columnExists(db, 'garments', 'query_count')) {
+    db.exec('ALTER TABLE garments ADD COLUMN query_count INTEGER NOT NULL DEFAULT 0;');
+    return;
+  }
+
+  db.prepare('UPDATE garments SET query_count = 0 WHERE query_count IS NULL').run();
 }
 
 function seedAdmin(db, config) {
@@ -651,6 +662,14 @@ export function findGarmentBySn(db, sn) {
   return db.prepare('SELECT * FROM garments WHERE sn = ?').get(sn);
 }
 
+export function incrementGarmentQueryCount(db, sn) {
+  db.prepare(
+    'UPDATE garments SET query_count = COALESCE(query_count, 0) + 1 WHERE sn = ?'
+  ).run(sn);
+
+  return findGarmentDetailBySn(db, sn);
+}
+
 export function findGarmentDetailBySn(db, sn) {
   return db
     .prepare(
@@ -658,6 +677,7 @@ export function findGarmentDetailBySn(db, sn) {
          g.id,
          g.sn,
          g.status AS sn_status,
+         g.query_count,
          g.created_at,
          g.updated_at,
          c.id AS clothing_id,
@@ -874,6 +894,7 @@ export function toGarmentDto(row) {
     remark: row.batch_remark || row.clothing_remark || row.legacy_remark || row.remark,
     clothingRemark: row.clothing_remark,
     batchRemark: row.batch_remark,
+    queryCount: Number(row.query_count || 0),
     status,
     snStatus: row.sn_status || row.status,
     clothingStatus: row.clothing_status,

@@ -92,7 +92,7 @@ async function lookup() {
   loading.value = true;
 
   try {
-    await getPublicGarment(code);
+    await getPublicGarment(code, { track: false });
     uni.navigateTo({
       url: `/pages/garment/detail?sn=${encodeURIComponent(code)}`
     });

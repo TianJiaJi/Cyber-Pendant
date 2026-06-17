@@ -11,6 +11,7 @@ import {
   findClothingById,
   findGarmentBySn,
   findGarmentDetailBySn,
+  incrementGarmentQueryCount,
   insertBatch,
   insertClothing,
   insertGarment,
@@ -159,11 +160,20 @@ async function handleLogin(req, res, context) {
   });
 }
 
-function handlePublicGarment(req, res, context, sn) {
-  const row = findGarmentDetailBySn(context.db, sn);
+function shouldTrackLookup(searchParams) {
+  const track = searchParams.get('track');
+  return track !== '0' && track !== 'false';
+}
+
+function handlePublicGarment(req, res, context, sn, searchParams) {
+  let row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
     throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  if (shouldTrackLookup(searchParams)) {
+    row = incrementGarmentQueryCount(context.db, sn);
   }
 
   const garment = toGarmentDto(row);
@@ -559,7 +569,7 @@ async function route(req, res, context) {
 
   const garmentSn = parsePathSn(pathname, '/api/garments/');
   if (garmentSn && req.method === 'GET') {
-    handlePublicGarment(req, res, context, garmentSn);
+    handlePublicGarment(req, res, context, garmentSn, searchParams);
     return;
   }
 

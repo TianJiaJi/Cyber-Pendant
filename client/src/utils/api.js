@@ -62,8 +62,9 @@ export function login(username, password) {
   });
 }
 
-export function getPublicGarment(sn) {
-  return request(`/api/garments/${encodeURIComponent(sn)}`, {
+export function getPublicGarment(sn, options = {}) {
+  const suffix = options.track === false ? '?track=0' : '';
+  return request(`/api/garments/${encodeURIComponent(sn)}${suffix}`, {
     auth: false
   });
 }

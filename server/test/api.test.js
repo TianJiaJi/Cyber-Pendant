@@ -145,6 +145,11 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   const publicGarment = (await publicLookup.json()).garment;
   assert.equal(publicGarment.productName, '单条测试外套');
   assert.equal(publicGarment.styleNo, 'SINGLE-JK-01');
+  assert.equal(publicGarment.queryCount, 1);
+
+  const previewLookup = await fetch(`${app.baseUrl}/api/garments/${sn}?track=0`);
+  assert.equal(previewLookup.status, 200);
+  assert.equal((await previewLookup.json()).garment.queryCount, 1);
 
   const qr = await fetch(`${app.baseUrl}/api/qrcode/${sn}?type=url`);
   assert.equal(qr.status, 200);
@@ -159,7 +164,9 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
 
   const inactiveLookup = await fetch(`${app.baseUrl}/api/garments/${sn}`);
   assert.equal(inactiveLookup.status, 423);
-  assert.equal((await inactiveLookup.json()).garment.status, 'inactive');
+  const inactiveGarment = (await inactiveLookup.json()).garment;
+  assert.equal(inactiveGarment.status, 'inactive');
+  assert.equal(inactiveGarment.queryCount, 2);
 
   const reactivated = await putJson(`${app.baseUrl}/api/garments/${sn}`, token, {
     status: 'active'

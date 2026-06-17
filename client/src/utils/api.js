@@ -77,6 +77,12 @@ export function bindPublicGarment(sn, data) {
   });
 }
 
+export function unbindGarmentBinding(sn) {
+  return request(`/api/garments/${encodeURIComponent(sn)}/binding`, {
+    method: 'DELETE'
+  });
+}
+
 function appendQuery(params, key, value) {
   if (value !== undefined && value !== null && String(value).trim() !== '') {
     params.push(`${key}=${encodeURIComponent(value)}`);

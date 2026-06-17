@@ -221,6 +221,17 @@
                 <view class="sn-meta">
                   <text>SN 状态：{{ record.snStatus === 'active' ? '有效' : '停用' }}</text>
                   <text>二维码：链接码</text>
+                  <text :class="['binding-status-text', record.isBound ? 'bound' : '']">
+                    绑定状态：{{ record.isBound ? '已绑定' : '未绑定' }}
+                  </text>
+                  <template v-if="record.isBound">
+                    <text>学生：{{ bindingField(record, 'studentName') }}</text>
+                    <text>学校：{{ bindingField(record, 'school') }}</text>
+                    <text>班级：{{ bindingField(record, 'className') }}</text>
+                    <text>联系人：{{ bindingField(record, 'contactName') }}</text>
+                    <text>联系电话：{{ bindingPhone(record) }}</text>
+                    <text>绑定时间：{{ bindingTime(record) }}</text>
+                  </template>
                 </view>
 
                 <view class="sn-actions">
@@ -235,6 +246,13 @@
                     @click="toggleGarmentStatus(record)"
                   >
                     {{ record.snStatus === 'active' ? '停用 SN' : '启用 SN' }}
+                  </button>
+                  <button
+                    v-if="record.isBound"
+                    class="danger-button small-button"
+                    @click="unbindBinding(record)"
+                  >
+                    解绑
                   </button>
                   <button class="danger-button small-button" @click="hardDeleteGarment(record)">
                     真删除
@@ -264,6 +282,7 @@ import {
   getToken,
   listClothingBatches,
   qrcodeUrl,
+  unbindGarmentBinding as unbindGarmentBindingApi,
   updateBatch,
   updateClothing,
   updateGarment
@@ -717,6 +736,26 @@ async function toggleGarmentStatus(record) {
   }
 }
 
+async function unbindBinding(record) {
+  const confirmed = await confirmAction(
+    `确认解绑 ${record.sn} 的学生绑定信息？解绑后公开页会显示为未绑定。`,
+    '解绑确认'
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await unbindGarmentBindingApi(record.sn);
+    message.value = `${record.sn} 已解绑学生信息。`;
+    await loadBatches();
+  } catch (error) {
+    handleAuthError(error);
+    message.value = error.message || '解绑失败。';
+  }
+}
+
 async function hardDeleteGarment(record) {
   const confirmed = await confirmAction(
     '真删除该 SN 后，已印刷二维码将查不到。确认继续？',
@@ -857,6 +896,28 @@ function openDetail(sn) {
   uni.navigateTo({
     url: `/pages/garment/detail?sn=${encodeURIComponent(sn)}`
   });
+}
+
+function bindingData(record) {
+  return record?.binding || record?.owner || {};
+}
+
+function bindingField(record, key) {
+  return bindingData(record)?.[key] || '未录入';
+}
+
+function bindingPhone(record) {
+  const binding = bindingData(record);
+  if (binding.contactPhone) {
+    return binding.contactPhone;
+  }
+
+  return binding.phoneTail ? `尾号 ${binding.phoneTail}` : '未录入';
+}
+
+function bindingTime(record) {
+  const value = bindingData(record).boundAt;
+  return value ? value.replace('T', ' ').slice(0, 19) : '未记录';
 }
 
 function downloadQr(sn, type) {
@@ -1113,6 +1174,11 @@ function logout() {
   font-size: 24rpx;
 }
 
+.binding-status-text.bound {
+  color: #4f874d;
+  font-weight: 650;
+}
+
 .batch-editor {
   display: grid;
   gap: 18rpx;
@@ -1250,8 +1316,8 @@ function logout() {
   }
 
   .sn-row {
-    grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) auto;
-    align-items: center;
+    grid-template-columns: minmax(170px, 0.7fr) minmax(250px, 1fr) minmax(250px, auto);
+    align-items: start;
   }
 
   .sn-main {
@@ -1260,8 +1326,9 @@ function logout() {
   }
 
   .sn-actions {
-    grid-template-columns: repeat(4, auto);
+    grid-template-columns: repeat(2, auto);
     justify-content: end;
+    align-content: start;
   }
 
   .sn-code {

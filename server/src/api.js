@@ -30,6 +30,7 @@ import {
   toBatchDto,
   toClothingDto,
   toGarmentDto,
+  unbindGarmentOwner,
   updateBatch,
   updateClothing,
   updateGarment,
@@ -142,7 +143,9 @@ function wantsHardDelete(searchParams) {
 }
 
 function batchWithGarments(context, batch) {
-  const garments = listGarmentsByBatchId(context.db, batch.id).map(toGarmentDto);
+  const garments = listGarmentsByBatchId(context.db, batch.id).map((row) =>
+    toGarmentDto(row, { privateBinding: true })
+  );
   return toBatchDto(batch, garments);
 }
 
@@ -172,23 +175,54 @@ function shouldTrackLookup(searchParams) {
 }
 
 function normalizeBindingInput(body) {
-  const ownerName = String(body.ownerName || '').trim();
-  const rawPhoneTail = String(body.ownerPhoneTail || body.phoneTail || '').trim();
-  const ownerPhoneTail = rawPhoneTail.replace(/\D/g, '');
+  const studentName = String(body.studentName || body.ownerName || '').trim();
+  const studentSchool = String(body.studentSchool || body.school || '').trim();
+  const studentClass = String(body.studentClass || body.className || '').trim();
+  const contactName = String(body.contactName || '').trim();
+  const contactPhone = String(body.contactPhone || body.phone || '')
+    .replace(/\D/g, '');
 
-  if (!ownerName) {
-    throw new HttpError(400, '请输入绑定人姓名');
+  if (!studentName) {
+    throw new HttpError(400, '请输入学生姓名');
   }
 
-  if (ownerName.length > 24) {
-    throw new HttpError(400, '绑定人姓名不能超过 24 个字符');
+  if (studentName.length > 24) {
+    throw new HttpError(400, '学生姓名不能超过 24 个字符');
   }
 
-  if (!/^\d{4}$/.test(ownerPhoneTail)) {
-    throw new HttpError(400, '请输入手机号后四位');
+  if (!studentSchool) {
+    throw new HttpError(400, '请输入学校');
   }
 
-  return { ownerName, ownerPhoneTail };
+  if (studentSchool.length > 80) {
+    throw new HttpError(400, '学校不能超过 80 个字符');
+  }
+
+  if (!studentClass) {
+    throw new HttpError(400, '请输入班级');
+  }
+
+  if (studentClass.length > 40) {
+    throw new HttpError(400, '班级不能超过 40 个字符');
+  }
+
+  if (contactName.length > 24) {
+    throw new HttpError(400, '联系人不能超过 24 个字符');
+  }
+
+  if (!/^\d{6,20}$/.test(contactPhone)) {
+    throw new HttpError(400, '请输入 6-20 位联系电话');
+  }
+
+  return {
+    studentName,
+    studentSchool,
+    studentClass,
+    contactName: contactName || null,
+    contactPhone,
+    ownerName: studentName,
+    ownerPhoneTail: contactPhone.slice(-4)
+  };
 }
 
 function handlePublicGarment(req, res, context, sn, searchParams) {
@@ -223,22 +257,36 @@ async function handleBindGarment(req, res, context, sn) {
 
   const garment = toGarmentDto(row);
   if (garment.status !== 'active') {
-    throw new HttpError(400, '该吊牌已停用，不能绑定主人');
+    throw new HttpError(400, '该吊牌已停用，不能绑定学生信息');
   }
 
   if (garment.isBound) {
-    throw new HttpError(409, '该吊牌已绑定主人');
+    throw new HttpError(409, '该吊牌已绑定学生信息');
   }
 
   const binding = normalizeBindingInput(await readJson(req));
   const updated = bindGarmentOwner(context.db, sn, binding);
 
   if (!updated.changed) {
-    throw new HttpError(409, '该吊牌已绑定主人');
+    throw new HttpError(409, '该吊牌已绑定学生信息');
   }
 
   sendJson(req, res, context.config, 200, {
     garment: toGarmentDto(updated.garment)
+  });
+}
+
+function handleUnbindGarment(req, res, context, sn) {
+  requireAdmin(req, context.config);
+  const row = findGarmentDetailBySn(context.db, sn);
+
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  const updated = unbindGarmentOwner(context.db, sn);
+  sendJson(req, res, context.config, 200, {
+    garment: toGarmentDto(updated.garment, { privateBinding: true })
   });
 }
 
@@ -435,7 +483,9 @@ async function handleCreateGarment(req, res, context) {
   }
 
   sendJson(req, res, context.config, 201, {
-    garment: toGarmentDto(findGarmentDetailBySn(context.db, created.sn))
+    garment: toGarmentDto(findGarmentDetailBySn(context.db, created.sn), {
+      privateBinding: true
+    })
   });
 }
 
@@ -451,7 +501,9 @@ async function handleUpdateGarment(req, res, context, sn) {
   const patch = normalizeGarmentInput(body, { partial: true });
   const updated = updateGarment(context.db, sn, patch);
 
-  sendJson(req, res, context.config, 200, { garment: toGarmentDto(updated) });
+  sendJson(req, res, context.config, 200, {
+    garment: toGarmentDto(updated, { privateBinding: true })
+  });
 }
 
 function handleDeleteGarment(req, res, context, sn, searchParams) {
@@ -472,7 +524,7 @@ function handleDeleteGarment(req, res, context, sn, searchParams) {
   sendJson(req, res, context.config, 200, {
     ok: true,
     deleted: 'soft',
-    garment: toGarmentDto(updated)
+    garment: toGarmentDto(updated, { privateBinding: true })
   });
 }
 
@@ -605,7 +657,7 @@ async function route(req, res, context) {
       batchId: searchParams.get('batchId') || ''
     });
     sendJson(req, res, context.config, 200, {
-      garments: rows.map(toGarmentDto)
+      garments: rows.map((row) => toGarmentDto(row, { privateBinding: true }))
     });
     return;
   }
@@ -624,6 +676,11 @@ async function route(req, res, context) {
   const bindingSn = parseGarmentBindingPath(pathname);
   if (bindingSn && req.method === 'POST') {
     await handleBindGarment(req, res, context, bindingSn);
+    return;
+  }
+
+  if (bindingSn && req.method === 'DELETE') {
+    handleUnbindGarment(req, res, context, bindingSn);
     return;
   }
 

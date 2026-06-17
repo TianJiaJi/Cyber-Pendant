@@ -154,29 +154,83 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   const invalidBinding = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ownerName: '张三', ownerPhoneTail: '12' })
+    body: JSON.stringify({
+      studentName: '张三',
+      studentSchool: '第一实验学校',
+      studentClass: '三年级二班',
+      contactPhone: '12'
+    })
   });
   assert.equal(invalidBinding.status, 400);
 
   const bound = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ownerName: '张三', ownerPhoneTail: '1234' })
+    body: JSON.stringify({
+      studentName: '张三',
+      studentSchool: '第一实验学校',
+      studentClass: '三年级二班',
+      contactName: '张女士',
+      contactPhone: '13800123456'
+    })
   });
   assert.equal(bound.status, 200);
   const boundGarment = (await bound.json()).garment;
   assert.equal(boundGarment.isBound, true);
   assert.equal(boundGarment.owner.name, '张*');
-  assert.equal(boundGarment.owner.phoneTail, '1234');
+  assert.equal(boundGarment.owner.school, '第一实验学校');
+  assert.equal(boundGarment.owner.className, '三年级二班');
+  assert.equal(boundGarment.owner.phoneTail, '3456');
   assert.ok(boundGarment.owner.boundAt);
   assert.equal(boundGarment.ownerName, undefined);
+  assert.equal(boundGarment.binding, undefined);
+  assert.equal(boundGarment.owner.contactPhone, undefined);
 
   const duplicateBinding = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ownerName: '李四', ownerPhoneTail: '5678' })
+    body: JSON.stringify({
+      studentName: '李四',
+      studentSchool: '第一实验学校',
+      studentClass: '三年级三班',
+      contactPhone: '13900125678'
+    })
   });
   assert.equal(duplicateBinding.status, 409);
+
+  const adminListWithBinding = await fetch(
+    `${app.baseUrl}/api/garments?q=${encodeURIComponent(sn)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  assert.equal(adminListWithBinding.status, 200);
+  const adminGarment = (await adminListWithBinding.json()).garments.find(
+    (item) => item.sn === sn
+  );
+  assert.ok(adminGarment);
+  assert.equal(adminGarment.binding.studentName, '张三');
+  assert.equal(adminGarment.binding.school, '第一实验学校');
+  assert.equal(adminGarment.binding.className, '三年级二班');
+  assert.equal(adminGarment.binding.contactName, '张女士');
+  assert.equal(adminGarment.binding.contactPhone, '13800123456');
+
+  const unauthorizedUnbind = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'DELETE'
+  });
+  assert.equal(unauthorizedUnbind.status, 401);
+
+  const unbound = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(unbound.status, 200);
+  const unboundGarment = (await unbound.json()).garment;
+  assert.equal(unboundGarment.isBound, false);
+  assert.equal(unboundGarment.owner, null);
+  assert.equal(unboundGarment.binding, null);
+
+  const publicAfterUnbind = await fetch(`${app.baseUrl}/api/garments/${sn}?track=0`);
+  assert.equal(publicAfterUnbind.status, 200);
+  assert.equal((await publicAfterUnbind.json()).garment.isBound, false);
 
   const qr = await fetch(`${app.baseUrl}/api/qrcode/${sn}?type=url`);
   assert.equal(qr.status, 200);

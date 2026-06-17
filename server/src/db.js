@@ -173,6 +173,11 @@ export function migrateDatabase(db, config) {
       production_date TEXT,
       remark TEXT,
       query_count INTEGER NOT NULL DEFAULT 0,
+      student_name TEXT,
+      student_school TEXT,
+      student_class TEXT,
+      contact_name TEXT,
+      contact_phone TEXT,
       owner_name TEXT,
       owner_phone_tail TEXT,
       owner_bound_at TEXT,
@@ -226,6 +231,11 @@ function ensureGarmentTextColumn(db, columnName) {
 }
 
 function ensureGarmentBindingColumns(db) {
+  ensureGarmentTextColumn(db, 'student_name');
+  ensureGarmentTextColumn(db, 'student_school');
+  ensureGarmentTextColumn(db, 'student_class');
+  ensureGarmentTextColumn(db, 'contact_name');
+  ensureGarmentTextColumn(db, 'contact_phone');
   ensureGarmentTextColumn(db, 'owner_name');
   ensureGarmentTextColumn(db, 'owner_phone_tail');
   ensureGarmentTextColumn(db, 'owner_bound_at');
@@ -691,13 +701,53 @@ export function bindGarmentOwner(db, sn, binding) {
   const result = db
     .prepare(
       `UPDATE garments
-       SET owner_name = ?,
+       SET student_name = ?,
+           student_school = ?,
+           student_class = ?,
+           contact_name = ?,
+           contact_phone = ?,
+           owner_name = ?,
            owner_phone_tail = ?,
            owner_bound_at = ?,
            updated_at = ?
-       WHERE sn = ? AND owner_bound_at IS NULL`
+       WHERE sn = ? AND owner_bound_at IS NULL AND student_name IS NULL`
     )
-    .run(binding.ownerName, binding.ownerPhoneTail, timestamp, timestamp, sn);
+    .run(
+      binding.studentName,
+      binding.studentSchool,
+      binding.studentClass,
+      binding.contactName,
+      binding.contactPhone,
+      binding.ownerName,
+      binding.ownerPhoneTail,
+      timestamp,
+      timestamp,
+      sn
+    );
+
+  return {
+    changed: result.changes > 0,
+    garment: findGarmentDetailBySn(db, sn)
+  };
+}
+
+export function unbindGarmentOwner(db, sn) {
+  const timestamp = nowIso();
+  const result = db
+    .prepare(
+      `UPDATE garments
+       SET student_name = NULL,
+           student_school = NULL,
+           student_class = NULL,
+           contact_name = NULL,
+           contact_phone = NULL,
+           owner_name = NULL,
+           owner_phone_tail = NULL,
+           owner_bound_at = NULL,
+           updated_at = ?
+       WHERE sn = ?`
+    )
+    .run(timestamp, sn);
 
   return {
     changed: result.changes > 0,
@@ -713,6 +763,11 @@ export function findGarmentDetailBySn(db, sn) {
          g.sn,
          g.status AS sn_status,
          g.query_count,
+         g.student_name,
+         g.student_school,
+         g.student_class,
+         g.contact_name,
+         g.contact_phone,
          g.owner_name,
          g.owner_phone_tail,
          g.owner_bound_at,
@@ -905,15 +960,44 @@ export function toBatchDto(row, garments = []) {
   };
 }
 
-export function toGarmentDto(row) {
+export function toGarmentDto(row, options = {}) {
   if (!row) {
     return null;
   }
 
   const status = row.sn_status ? effectiveStatus(row) : row.status;
-  const isBound = Boolean(row.owner_bound_at);
+  const studentName = row.student_name || row.owner_name;
+  const school = row.student_school || null;
+  const className = row.student_class || null;
+  const contactName = row.contact_name || null;
+  const contactPhone = row.contact_phone || null;
+  const phoneTail =
+    row.owner_phone_tail || String(contactPhone || '').replace(/\D/g, '').slice(-4) || null;
+  const boundAt = row.owner_bound_at || null;
+  const isBound = Boolean(boundAt || studentName);
+  const owner = isBound
+    ? {
+        name: maskOwnerName(studentName),
+        school,
+        className,
+        phoneTail,
+        boundAt
+      }
+    : null;
+  const binding =
+    options.privateBinding && isBound
+      ? {
+          studentName,
+          school,
+          className,
+          contactName,
+          contactPhone,
+          phoneTail,
+          boundAt
+        }
+      : null;
 
-  return {
+  const dto = {
     id: row.id,
     clothingId: row.clothing_id,
     batchId: row.batch_id,
@@ -945,13 +1029,7 @@ export function toGarmentDto(row) {
     batchRemark: row.batch_remark,
     queryCount: Number(row.query_count || 0),
     isBound,
-    owner: isBound
-      ? {
-          name: maskOwnerName(row.owner_name),
-          phoneTail: row.owner_phone_tail,
-          boundAt: row.owner_bound_at
-        }
-      : null,
+    owner,
     status,
     snStatus: row.sn_status || row.status,
     clothingStatus: row.clothing_status,
@@ -959,6 +1037,12 @@ export function toGarmentDto(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+
+  if (options.privateBinding) {
+    dto.binding = binding;
+  }
+
+  return dto;
 }
 
 function legacyStyleById(db, id) {

@@ -124,7 +124,7 @@
       <view v-if="bindingPanelVisible" class="bind-overlay">
         <view class="bind-panel" @click.stop>
           <view class="bind-panel-header">
-            <text class="bind-panel-title">绑定校服主人</text>
+            <text class="bind-panel-title">绑定学生信息</text>
             <button class="bind-close" hover-class="bind-close-hover" @click="closeBindingPanel">
               关闭
             </button>
@@ -132,25 +132,52 @@
 
           <view class="bind-form">
             <view class="bind-field">
-              <text class="bind-label">绑定人姓名</text>
+              <text class="bind-label">学生姓名</text>
               <input
-                v-model="bindingForm.ownerName"
+                v-model="bindingForm.studentName"
                 class="bind-input"
                 maxlength="24"
                 placeholder="例如 张三"
               />
             </view>
             <view class="bind-field">
-              <text class="bind-label">手机号后四位</text>
+              <text class="bind-label">学校</text>
               <input
-                v-model="bindingForm.ownerPhoneTail"
+                v-model="bindingForm.studentSchool"
                 class="bind-input"
-                type="number"
-                maxlength="4"
-                placeholder="用于找回时核验"
+                maxlength="80"
+                placeholder="例如 第一实验学校"
               />
             </view>
-            <text class="bind-help">绑定后公开页面只展示脱敏姓名和手机尾号。</text>
+            <view class="bind-field">
+              <text class="bind-label">班级</text>
+              <input
+                v-model="bindingForm.studentClass"
+                class="bind-input"
+                maxlength="40"
+                placeholder="例如 三年级二班"
+              />
+            </view>
+            <view class="bind-field">
+              <text class="bind-label">联系人（可选）</text>
+              <input
+                v-model="bindingForm.contactName"
+                class="bind-input"
+                maxlength="24"
+                placeholder="例如 张女士"
+              />
+            </view>
+            <view class="bind-field">
+              <text class="bind-label">联系电话</text>
+              <input
+                v-model="bindingForm.contactPhone"
+                class="bind-input"
+                type="tel"
+                maxlength="20"
+                placeholder="手机号或固定电话"
+              />
+            </view>
+            <text class="bind-help">公开页面仅展示脱敏姓名、学校班级和电话尾号；后台可查看完整信息并解绑。</text>
             <text v-if="bindingMessage" class="bind-message">{{ bindingMessage }}</text>
           </view>
 
@@ -182,8 +209,11 @@ const bindingPanelVisible = ref(false);
 const bindingSubmitting = ref(false);
 const bindingMessage = ref('');
 const bindingForm = ref({
-  ownerName: '',
-  ownerPhoneTail: ''
+  studentName: '',
+  studentSchool: '',
+  studentClass: '',
+  contactName: '',
+  contactPhone: ''
 });
 
 const currentGarment = computed(() => garment.value || inactiveGarment.value);
@@ -208,29 +238,34 @@ const isBound = computed(() => Boolean(ownerInfo.value));
 
 const bindingTitle = computed(() => {
   if (isBound.value) {
-    return '该校服已绑定主人';
+    return '该校服已绑定学生';
   }
 
   if (isInactive.value) {
     return '该校服暂不可绑定';
   }
 
-  return '该校服暂未绑定主人';
+  return '该校服暂未绑定学生';
 });
 
 const bindingDescription = computed(() => {
   if (isBound.value) {
+    const pieces = [
+      ownerInfo.value?.name || '已绑定',
+      ownerInfo.value?.school,
+      ownerInfo.value?.className
+    ].filter(Boolean);
     const phoneText = ownerInfo.value?.phoneTail
-      ? `手机号尾号 ${ownerInfo.value.phoneTail}`
+      ? `电话尾号 ${ownerInfo.value.phoneTail}`
       : '身份信息已留存';
-    return `${ownerInfo.value?.name || '已绑定'} · ${phoneText}`;
+    return [...pieces, phoneText].join(' · ');
   }
 
   if (isInactive.value) {
-    return '吊牌停用后不能绑定身份';
+    return '吊牌停用后不能绑定学生信息';
   }
 
-  return '绑定身份让校服有归属防丢失';
+  return '录入学生信息后，后台可查看并支持解绑';
 });
 
 const tagFields = computed(() => {
@@ -331,23 +366,46 @@ function closeBindingPanel() {
   bindingMessage.value = '';
 }
 
-function normalizePhoneTail() {
-  return bindingForm.value.ownerPhoneTail.replace(/\D/g, '').slice(0, 4);
+function normalizeContactPhone() {
+  return bindingForm.value.contactPhone.replace(/\D/g, '').slice(0, 20);
+}
+
+function emptyBindingForm() {
+  return {
+    studentName: '',
+    studentSchool: '',
+    studentClass: '',
+    contactName: '',
+    contactPhone: ''
+  };
 }
 
 async function submitBinding() {
-  const ownerName = bindingForm.value.ownerName.trim();
-  const ownerPhoneTail = normalizePhoneTail();
-  bindingForm.value.ownerPhoneTail = ownerPhoneTail;
+  const studentName = bindingForm.value.studentName.trim();
+  const studentSchool = bindingForm.value.studentSchool.trim();
+  const studentClass = bindingForm.value.studentClass.trim();
+  const contactName = bindingForm.value.contactName.trim();
+  const contactPhone = normalizeContactPhone();
+  bindingForm.value.contactPhone = contactPhone;
   bindingMessage.value = '';
 
-  if (!ownerName) {
-    bindingMessage.value = '请输入绑定人姓名。';
+  if (!studentName) {
+    bindingMessage.value = '请输入学生姓名。';
     return;
   }
 
-  if (!/^\d{4}$/.test(ownerPhoneTail)) {
-    bindingMessage.value = '请输入手机号后四位。';
+  if (!studentSchool) {
+    bindingMessage.value = '请输入学校。';
+    return;
+  }
+
+  if (!studentClass) {
+    bindingMessage.value = '请输入班级。';
+    return;
+  }
+
+  if (!/^\d{6,20}$/.test(contactPhone)) {
+    bindingMessage.value = '请输入 6-20 位联系电话。';
     return;
   }
 
@@ -355,16 +413,16 @@ async function submitBinding() {
 
   try {
     const response = await bindPublicGarment(currentGarment.value.sn, {
-      ownerName,
-      ownerPhoneTail
+      studentName,
+      studentSchool,
+      studentClass,
+      contactName,
+      contactPhone
     });
     garment.value = response.garment;
     inactiveGarment.value = null;
     bindingPanelVisible.value = false;
-    bindingForm.value = {
-      ownerName: '',
-      ownerPhoneTail: ''
-    };
+    bindingForm.value = emptyBindingForm();
     uni.showToast({
       title: '绑定成功',
       icon: 'success'
@@ -923,6 +981,9 @@ async function submitBinding() {
 .bind-panel {
   width: 100%;
   max-width: 444px;
+  max-height: calc(100vh - 64rpx);
+  display: flex;
+  flex-direction: column;
   padding: 34rpx;
   border: 1px solid #ded5c9;
   border-radius: 22rpx 22rpx 14rpx 14rpx;
@@ -960,6 +1021,9 @@ async function submitBinding() {
   display: grid;
   gap: 22rpx;
   margin-top: 28rpx;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4rpx;
 }
 
 .bind-field {
@@ -1003,6 +1067,7 @@ async function submitBinding() {
 }
 
 .bind-submit {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -2,8 +2,14 @@
   <view class="page-shell detail-page">
     <view class="phone-shell">
       <view class="detail-topbar">
-        <button class="nav-button" hover-class="nav-button-hover" @click="goHome">
-          返回
+        <button
+          class="nav-button"
+          hover-class="nav-button-hover"
+          aria-label="返回查询"
+          @click="goHome"
+        >
+          <text class="nav-chevron">‹</text>
+          <text class="nav-text">返回</text>
         </button>
         <text class="topbar-title">可追溯更放心</text>
         <view class="topbar-spacer"></view>
@@ -56,7 +62,21 @@
           <view class="tag-copy">
             <view v-for="item in tagFields" :key="item.label" class="tag-row">
               <text class="tag-label">{{ item.label }}：</text>
-              <text class="tag-value">{{ item.value || '未录入' }}</text>
+              <view
+                v-if="item.type === 'standards' && splitStandardList(item.value).length > 1"
+                class="tag-standard-list"
+              >
+                <text
+                  v-for="(standard, index) in splitStandardList(item.value)"
+                  :key="`${standard}-${index}`"
+                  class="tag-standard-chip"
+                >
+                  {{ standard }}
+                </text>
+              </view>
+              <text v-else class="tag-value">
+                {{ item.type === 'standards' ? standardDisplayText(item.value) || '未录入' : item.value || '未录入' }}
+              </text>
             </view>
           </view>
 
@@ -280,7 +300,7 @@ const tagFields = computed(() => {
     { label: '颜色尺码', value: [current.color, current.size].filter(Boolean).join(' / ') },
     { label: '生产批次', value: current.batchNo },
     { label: '生产日期', value: current.productionDate },
-    { label: '执行标准', value: current.standard },
+    { label: '执行标准', value: current.standard, type: 'standards' },
     { label: '安全类别', value: current.safetyCategory },
     { label: '质量等级', value: current.grade },
     { label: '面料成分', value: current.fabric },
@@ -330,6 +350,18 @@ function goHome() {
   uni.reLaunch({
     url: '/pages/index/index'
   });
+}
+
+function splitStandardList(value) {
+  return String(value || '')
+    .split(/[\n\r；;、,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function standardDisplayText(value) {
+  const items = splitStandardList(value);
+  return items.length ? items.join('；') : '';
 }
 
 function toggleCompany() {
@@ -486,15 +518,47 @@ async function submitBinding() {
 }
 
 .nav-button {
-  min-height: 64rpx;
-  padding: 0;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  min-width: 118rpx;
+  min-height: 74rpx;
+  padding: 0 20rpx 0 14rpx;
+  border: 1px solid rgba(213, 202, 185, 0.9);
+  border-radius: 999rpx;
+  background: rgba(255, 253, 248, 0.82);
+  color: #36312a;
+  box-shadow:
+    0 6rpx 16rpx rgba(73, 61, 43, 0.06),
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.92);
   text-align: left;
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 600;
 }
 
 .nav-button-hover {
-  color: #6b8f62;
+  border-color: rgba(126, 158, 111, 0.48);
+  background: #f8fbf4;
+  color: #4f7f46;
+}
+
+.nav-chevron,
+.nav-text {
+  display: block;
+  line-height: 1;
+}
+
+.nav-chevron {
+  margin-top: -2rpx;
+  font-size: 38rpx;
+  font-weight: 520;
+}
+
+.nav-text {
+  font-size: 25rpx;
+  font-weight: 670;
 }
 
 .topbar-title {
@@ -759,6 +823,25 @@ async function submitBinding() {
 .tag-value {
   min-width: 0;
   word-break: break-word;
+}
+
+.tag-standard-list {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+
+.tag-standard-chip {
+  max-width: 100%;
+  padding: 5rpx 12rpx;
+  border: 1px solid rgba(117, 149, 103, 0.26);
+  border-radius: 999rpx;
+  background: rgba(247, 251, 244, 0.84);
+  color: #47663c;
+  font-size: 24rpx;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
 }
 
 .tag-qr-panel {

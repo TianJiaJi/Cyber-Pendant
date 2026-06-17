@@ -65,6 +65,15 @@
             </view>
 
             <view class="form-field wide-field">
+              <text class="field-label">执行标准</text>
+              <textarea
+                v-model="clothingForm.standard"
+                class="form-textarea standard-textarea"
+                :placeholder="standardPlaceholder"
+              />
+            </view>
+
+            <view class="form-field wide-field">
               <text class="field-label">面料</text>
               <textarea
                 v-model="clothingForm.fabric"
@@ -153,7 +162,19 @@
             </view>
 
             <view class="clothing-meta">
-              <text>执行标准：{{ item.standard || '未录入' }}</text>
+              <view class="meta-row standard-meta">
+                <text class="meta-label">执行标准：</text>
+                <view v-if="splitStandardList(item.standard).length > 1" class="standard-list">
+                  <text
+                    v-for="(standard, index) in splitStandardList(item.standard)"
+                    :key="`${standard}-${index}`"
+                    class="standard-chip"
+                  >
+                    {{ standard }}
+                  </text>
+                </view>
+                <text v-else>{{ standardDisplayText(item.standard) || '未录入' }}</text>
+              </view>
               <text>安全类别：{{ item.safetyCategory || '未录入' }}</text>
               <text>质量等级：{{ item.grade || '未录入' }}</text>
               <text>面料：{{ item.fabric || '未录入' }}</text>
@@ -198,12 +219,17 @@ const emptyClothingForm = {
 
 const clothingTextFields = [
   { key: 'productName', label: '衣服名称', placeholder: '高级梭织外套' },
-  { key: 'standard', label: '执行标准', placeholder: 'GB/T 2664-2017' },
   { key: 'safetyCategory', label: '安全类别', placeholder: 'GB 18401-2010 B 类' },
   { key: 'grade', label: '质量等级', placeholder: '一等品' },
   { key: 'manufacturer', label: '厂家', placeholder: '赛博衣饰制造有限公司' },
   { key: 'manufacturerAddress', label: '厂家地址', placeholder: '广东省深圳市南山区...' }
 ];
+
+const standardPlaceholder = [
+  'GB/T 2664-2017',
+  'GB 18401-2010 B 类',
+  'GB 31701-2015'
+].join('\n');
 
 const clothingForm = reactive({ ...emptyClothingForm });
 const clothes = ref([]);
@@ -301,6 +327,18 @@ function statusText(status) {
 
 function formatDateTime(value) {
   return value ? value.replace('T', ' ').slice(0, 16) : '未记录';
+}
+
+function splitStandardList(value) {
+  return String(value || '')
+    .split(/[\n\r；;、,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function standardDisplayText(value) {
+  const items = splitStandardList(value);
+  return items.length ? items.join('；') : '';
 }
 
 function goDetail(id) {
@@ -490,6 +528,11 @@ function goHome() {
   grid-column: 1 / -1;
 }
 
+.standard-textarea {
+  min-height: 186rpx;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
 .small-button {
   min-height: 74rpx;
   padding: 0 20rpx;
@@ -621,6 +664,40 @@ function goHome() {
   gap: 8rpx;
   color: #6b665f;
   font-size: 24rpx;
+}
+
+.meta-row {
+  min-width: 0;
+}
+
+.standard-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6rpx;
+  align-items: start;
+}
+
+.meta-label {
+  white-space: nowrap;
+}
+
+.standard-list {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+
+.standard-chip {
+  max-width: 100%;
+  padding: 4rpx 12rpx;
+  border: 1px solid #d8dfd1;
+  border-radius: 999rpx;
+  background: #f7fbf4;
+  color: #415f37;
+  font-size: 22rpx;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .clothing-footer {
@@ -775,6 +852,11 @@ function goHome() {
 
   .clothing-meta {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .standard-chip {
+    padding: 2px 8px;
+    font-size: 12px;
   }
 }
 </style>

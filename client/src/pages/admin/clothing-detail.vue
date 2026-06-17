@@ -62,7 +62,21 @@
           <view v-if="!clothingEditorOpen" class="info-grid">
             <view v-for="item in clothingInfoRows" :key="item.label" class="info-item">
               <text class="info-label">{{ item.label }}</text>
-              <text class="info-value">{{ item.value || '未录入' }}</text>
+              <view
+                v-if="item.type === 'standards' && splitStandardList(item.value).length > 1"
+                class="standard-list"
+              >
+                <text
+                  v-for="(standard, index) in splitStandardList(item.value)"
+                  :key="`${standard}-${index}`"
+                  class="standard-chip"
+                >
+                  {{ standard }}
+                </text>
+              </view>
+              <text v-else class="info-value">
+                {{ item.type === 'standards' ? standardDisplayText(item.value) || '未录入' : item.value || '未录入' }}
+              </text>
             </view>
           </view>
 
@@ -73,6 +87,15 @@
                 v-model="clothingForm[field.key]"
                 class="form-input"
                 :placeholder="field.placeholder"
+              />
+            </view>
+
+            <view class="form-field wide-field">
+              <text class="field-label">执行标准</text>
+              <textarea
+                v-model="clothingForm.standard"
+                class="form-textarea standard-textarea"
+                :placeholder="standardPlaceholder"
               />
             </view>
 
@@ -405,7 +428,6 @@ function createEmptyBatchForm() {
 
 const clothingTextFields = [
   { key: 'productName', label: '衣服名称', placeholder: '高级梭织外套' },
-  { key: 'standard', label: '执行标准', placeholder: 'GB/T 2664-2017' },
   { key: 'safetyCategory', label: '安全类别', placeholder: 'GB 18401-2010 B 类' },
   { key: 'grade', label: '质量等级', placeholder: '一等品' },
   { key: 'manufacturer', label: '厂家', placeholder: '赛博衣饰制造有限公司' },
@@ -420,8 +442,15 @@ const batchTextFields = [
   { key: 'productionDate', label: '生产日期', placeholder: todayDateString() }
 ];
 
+const standardPlaceholder = [
+  'GB/T 2664-2017',
+  'GB 18401-2010 B 类',
+  'GB 31701-2015'
+].join('\n');
+
 const exportColumns = [
   { key: 'clothingName', label: '衣服名称' },
+  { key: 'standard', label: '执行标准' },
   { key: 'styleNo', label: '款号' },
   { key: 'color', label: '颜色' },
   { key: 'size', label: '尺码' },
@@ -461,7 +490,7 @@ const clothingInfoRows = computed(() => [
   { label: '衣服名称', value: clothingForm.productName },
   { label: '厂家', value: clothingForm.manufacturer },
   { label: '厂家地址', value: clothingForm.manufacturerAddress },
-  { label: '执行标准', value: clothingForm.standard },
+  { label: '执行标准', value: clothingForm.standard, type: 'standards' },
   { label: '安全类别', value: clothingForm.safetyCategory },
   { label: '质量等级', value: clothingForm.grade },
   { label: '面料', value: clothingForm.fabric },
@@ -555,6 +584,23 @@ function batchSummary(batch) {
 
 function batchSnCount(batch) {
   return Number(batch?.garmentCount ?? batch?.garments?.length ?? 0);
+}
+
+function splitStandardList(value) {
+  return String(value || '')
+    .split(/[\n\r；;、,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function standardDisplayText(value) {
+  const items = splitStandardList(value);
+  return items.length ? items.join('；') : '';
+}
+
+function formatStandardForExport(value) {
+  const items = splitStandardList(value);
+  return items.length ? items.join('；') : String(value || '').trim();
 }
 
 function isBatchExpanded(batchId) {
@@ -959,6 +1005,7 @@ function chooseExportFormat(batch) {
 function getExportRows(batch) {
   return (batch.garments || []).map((record) => ({
     clothingName: clothing.value?.productName || record.productName || '',
+    standard: formatStandardForExport(clothing.value?.standard || record.standard || ''),
     styleNo: batch.styleNo || record.styleNo || '',
     color: batch.color || record.color || '',
     size: batch.size || record.size || '',
@@ -987,6 +1034,7 @@ function exportExcel(batch) {
   const sheet = XLSX.utils.aoa_to_sheet(sheetData);
   sheet['!cols'] = [
     { wch: 18 },
+    { wch: 28 },
     { wch: 16 },
     { wch: 10 },
     { wch: 10 },
@@ -1421,6 +1469,30 @@ function logout() {
   grid-column: 1 / -1;
 }
 
+.standard-textarea {
+  min-height: 186rpx;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.standard-list {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+
+.standard-chip {
+  max-width: 100%;
+  padding: 4rpx 12rpx;
+  border: 1px solid #d8dfd1;
+  border-radius: 999rpx;
+  background: #f7fbf4;
+  color: #415f37;
+  font-size: 22rpx;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .date-picker-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1738,6 +1810,11 @@ function logout() {
 
   .info-value {
     font-size: 14px;
+  }
+
+  .standard-chip {
+    padding: 2px 8px;
+    font-size: 12px;
   }
 
   .form-grid {

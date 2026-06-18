@@ -39,9 +39,8 @@
             <input
               v-model="sn"
               class="sn-input"
-              confirm-type="search"
               placeholder="例如 CP20260615DEMO01"
-              @confirm="lookup"
+              maxlength="16"
             />
           </view>
 
@@ -103,6 +102,34 @@ const message = ref('');
 const scannerVisible = ref(false);
 let html5Scanner = null;
 
+// 防抖控制
+let queryTimer = null;
+const QUERY_DEBOUNCE_MS = 1000; // 1秒内不能重复查询
+let lastQueryTime = 0;
+
+// SN 码验证规则（简化版，允许数据库中的各种 SN 码）
+function validateSN(sn) {
+  const code = sn.trim().toUpperCase();
+  if (!code) {
+    return { valid: false, error: '请输入 SN 码' };
+  }
+  if (!code.startsWith('CP')) {
+    return { valid: false, error: 'SN 码必须以 CP 开头' };
+  }
+  if (code.length < 12) {
+    return { valid: false, error: 'SN 码长度不足' };
+  }
+  if (code.length > 20) {
+    return { valid: false, error: 'SN 码过长' };
+  }
+  // 基本格式检查：CP + 至少10位字符
+  const snPattern = /^CP[A-Z0-9]{10,}$/;
+  if (!snPattern.test(code)) {
+    return { valid: false, error: 'SN 码格式不正确' };
+  }
+  return { valid: true, code };
+}
+
 const trustItems = [
   {
     kicker: '01',
@@ -127,15 +154,38 @@ function normalizeInput() {
 
 async function lookup() {
   console.log('[Lookup] Function called');
-  const code = normalizeInput();
-  console.log('[Lookup] Normalized SN:', code);
-  message.value = '';
 
-  if (!code) {
-    console.log('[Lookup] Empty SN, showing error');
-    message.value = '请输入 SN 码。';
+  // 防抖检查
+  const now = Date.now();
+  if (now - lastQueryTime < QUERY_DEBOUNCE_MS) {
+    const remaining = Math.ceil((QUERY_DEBOUNCE_MS - (now - lastQueryTime)) / 1000);
+    console.log(`[Lookup] Debounce active, please wait ${remaining}s`);
+    message.value = `请等待 ${remaining} 秒后再试`;
+    setTimeout(() => {
+      if (message.value === `请等待 ${remaining} 秒后再试`) {
+        message.value = '';
+      }
+    }, remaining * 1000);
     return;
   }
+
+  const inputCode = normalizeInput();
+  console.log('[Lookup] Normalized SN:', inputCode);
+  message.value = '';
+
+  // 验证 SN 码
+  const validation = validateSN(inputCode);
+  if (!validation.valid) {
+    console.log('[Lookup] Validation failed:', validation.error);
+    message.value = validation.error;
+    return;
+  }
+
+  const code = validation.code;
+  console.log('[Lookup] Validation passed, SN:', code);
+
+  // 更新最后查询时间
+  lastQueryTime = now;
 
   console.log('[Lookup] Starting query for SN:', code);
   loading.value = true;

@@ -123,6 +123,13 @@ test('login, user center, and authenticated user APIs are wired into the client'
   assert.match(detailFile, /confirmReportLostDisclosure/, 'lost reporting should require a disclosure confirmation');
   assert.match(detailFile, /只有报失后才会披露完整联系方式/, 'detail page should state the masking rule');
   assert.match(detailFile, /该校服已报失/, 'detail page should strongly show lost status');
+  assert.match(detailFile, /query\?\.scene/, 'mini-program QR codes should be able to pass SN through scene');
+  assert.match(detailFile, /decodeURIComponent/, 'scene parameters should be decoded before lookup');
+  assert.match(detailFile, /disclosureRows/, 'revealed contact should be rendered as structured rows');
+  assert.match(detailFile, /学生/, 'revealed contact should include the student');
+  assert.match(detailFile, /学校班级/, 'revealed contact should include school and class');
+  assert.match(detailFile, /联系电话/, 'revealed contact should include the phone label');
+  assert.match(block(baseCss(readVueStyle('src/pages/garment/detail.vue')), '.lost-contact-card'), /display:\s*grid;/, 'revealed contact card should use a structured layout');
   assert.match(block(baseCss(readVueStyle('src/pages/garment/detail.vue')), '.lost-actions'), /display:\s*flex;/, 'lost action buttons should not collapse when one button changes');
   assert.match(loginFile, /uni\.login/, 'login page should call the mini-program login API');
   assert.match(userFile, /getUserGarments/, 'user center should load bound garments');

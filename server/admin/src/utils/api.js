@@ -9,6 +9,9 @@ export const FRONTEND_BASE_URL =
   'http://localhost:5173';
 
 const TOKEN_KEY = 'cyber_pendant_admin_token';
+export const QRCODE_MODE_KEY = 'cyber_pendant_qrcode_mode';
+export const QRCODE_MODE_URL = 'url';
+export const QRCODE_MODE_MINI_PROGRAM = 'mini-program';
 
 function absoluteApiBaseUrl() {
   if (API_BASE_URL) {
@@ -72,6 +75,17 @@ export function getToken() {
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getQrcodeMode() {
+  const saved = localStorage.getItem(QRCODE_MODE_KEY);
+  return saved === QRCODE_MODE_MINI_PROGRAM ? QRCODE_MODE_MINI_PROGRAM : QRCODE_MODE_URL;
+}
+
+export function saveQrcodeMode(mode) {
+  const normalized = mode === QRCODE_MODE_MINI_PROGRAM ? QRCODE_MODE_MINI_PROGRAM : QRCODE_MODE_URL;
+  localStorage.setItem(QRCODE_MODE_KEY, normalized);
+  return normalized;
 }
 
 export function login(username, password) {
@@ -215,6 +229,6 @@ export function publicGarmentDetailUrl(sn) {
   return `${baseUrl}/#/pages/garment/detail?sn=${encodeURIComponent(sn)}`;
 }
 
-export function qrcodeUrl(sn, type = 'url') {
-  return `${absoluteApiBaseUrl()}/api/qrcode/${encodeURIComponent(sn)}?type=${type}`;
+export function qrcodeUrl(sn, type = QRCODE_MODE_URL) {
+  return `${absoluteApiBaseUrl()}/api/qrcode/${encodeURIComponent(sn)}?type=${encodeURIComponent(type)}`;
 }

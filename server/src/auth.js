@@ -147,3 +147,89 @@ export async function code2Openid(code, appId, appSecret, fetchImpl = fetch) {
 
   return result;
 }
+
+export async function getWechatAccessToken(appId, appSecret, fetchImpl = fetch) {
+  if (!appId || !appSecret) {
+    const error = new Error('微信小程序配置缺失');
+    error.status = 500;
+    throw error;
+  }
+
+  const url = new URL('https://api.weixin.qq.com/cgi-bin/token');
+  url.searchParams.set('grant_type', 'client_credential');
+  url.searchParams.set('appid', appId);
+  url.searchParams.set('secret', appSecret);
+
+  const response = await fetchImpl(url);
+  const result = await response.json();
+
+  if (result.errcode) {
+    const error = new Error(result.errmsg || '微信 access_token 获取失败');
+    error.status = 502;
+    error.details = { errcode: result.errcode };
+    throw error;
+  }
+
+  if (!result.access_token) {
+    const error = new Error('微信 access_token 响应无效');
+    error.status = 502;
+    throw error;
+  }
+
+  return {
+    accessToken: result.access_token,
+    expiresIn: Number(result.expires_in || 7200)
+  };
+}
+
+export async function getWechatUnlimitedQRCode(request, fetchImpl = fetch) {
+  if (!request?.accessToken) {
+    const error = new Error('微信 access_token 缺失');
+    error.status = 500;
+    throw error;
+  }
+
+  const url = new URL('https://api.weixin.qq.com/wxa/getwxacodeunlimit');
+  url.searchParams.set('access_token', request.accessToken);
+
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      scene: request.scene,
+      page: request.page,
+      check_path: Boolean(request.checkPath),
+      env_version: request.envVersion,
+      width: request.width
+    })
+  });
+  const contentType = response.headers.get('content-type') || '';
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (contentType.includes('application/json')) {
+    let result = {};
+    try {
+      result = JSON.parse(buffer.toString('utf8'));
+    } catch {
+      // Keep the generic response error below.
+    }
+
+    const error = new Error(result.errmsg || '微信小程序码生成失败');
+    error.status = response.ok ? 502 : response.status;
+    error.details = result.errcode ? { errcode: result.errcode } : undefined;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error('微信小程序码生成失败');
+    error.status = response.status;
+    throw error;
+  }
+
+  return {
+    contentType: contentType || 'image/png',
+    buffer
+  };
+}

@@ -299,6 +299,45 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   assert.equal(missingLookup.status, 404);
 });
 
+test('mini-program QR code generation uses WeChat scene and page', async (t) => {
+  const miniProgramCodeCalls = [];
+  const app = await startTestServer({
+    wechatAccessTokenProvider: async () => ({
+      accessToken: 'ACCESS_TOKEN_FOR_TEST',
+      expiresIn: 7200
+    }),
+    wechatMiniProgramCodeProvider: async (request) => {
+      miniProgramCodeCalls.push(request);
+      return {
+        contentType: 'image/png',
+        buffer: Buffer.from('fake-mini-program-code-image')
+      };
+    }
+  });
+  t.after(() => app.close());
+
+  const token = await loginAsAdmin(app.baseUrl);
+  const clothing = await createTestClothing(app.baseUrl, token, {
+    productName: '小程序码测试校服'
+  });
+  const batch = await createTestBatch(app.baseUrl, token, clothing.id, { count: 1 });
+  const sn = batch.garments[0].sn;
+
+  const qr = await fetch(`${app.baseUrl}/api/qrcode/${sn}?type=mini-program`);
+  assert.equal(qr.status, 200);
+  assert.equal(qr.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await qr.arrayBuffer()).toString(), 'fake-mini-program-code-image');
+  assert.equal(miniProgramCodeCalls.length, 1);
+  assert.deepEqual(miniProgramCodeCalls[0], {
+    accessToken: 'ACCESS_TOKEN_FOR_TEST',
+    scene: sn,
+    page: 'pages/garment/detail',
+    checkPath: false,
+    envVersion: 'release',
+    width: 430
+  });
+});
+
 test('wechat login, user-owned binding, lost report, contact reveal, and user center APIs', async (t) => {
   const codeMap = new Map([
     ['CODE_A', { openid: 'openid-user-a', session_key: 'ignored-a' }],
@@ -458,7 +497,13 @@ test('wechat login, user-owned binding, lost report, contact reveal, and user ce
     source: 'detail'
   });
   assert.equal(reveal.status, 200);
-  assert.equal((await reveal.json()).contact.contactPhone, '13800123456');
+  const revealPayload = await reveal.json();
+  assert.equal(revealPayload.contact.studentName, '张三');
+  assert.equal(revealPayload.contact.school, '第一实验学校');
+  assert.equal(revealPayload.contact.className, '三年级三班');
+  assert.equal(revealPayload.contact.contactName, '张女士');
+  assert.equal(revealPayload.contact.contactPhone, '13800123456');
+  assert.equal(revealPayload.garment.owner.studentName, '张三');
 
   const ownerReveal = await postJson(`${app.baseUrl}/api/garments/${sn}/contact-reveal`, userA.token, {
     source: 'detail'

@@ -21,6 +21,14 @@ function normalizeBasePath(value, fallback) {
   return `/${raw.replace(/^\/+|\/+$/g, '')}`;
 }
 
+function booleanValue(value, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 function stripEnvValue(value) {
   const trimmed = value.trim();
 
@@ -94,6 +102,15 @@ export function createConfig(overrides = {}) {
     wechatAppId: overrides.wechatAppId || env.WECHAT_APP_ID || '',
     wechatAppSecret: overrides.wechatAppSecret || env.WECHAT_APP_SECRET || '',
     wechatCode2Session: overrides.wechatCode2Session || null,
+    wechatAccessTokenProvider: overrides.wechatAccessTokenProvider || null,
+    wechatMiniProgramCodeProvider: overrides.wechatMiniProgramCodeProvider || null,
+    wechatQrPage: overrides.wechatQrPage || env.WECHAT_QR_PAGE || 'pages/garment/detail',
+    wechatQrEnvVersion: overrides.wechatQrEnvVersion || env.WECHAT_QR_ENV_VERSION || 'release',
+    wechatQrCheckPath: booleanValue(
+      overrides.wechatQrCheckPath ?? env.WECHAT_QR_CHECK_PATH,
+      false
+    ),
+    wechatQrWidth: Number(overrides.wechatQrWidth || env.WECHAT_QR_WIDTH || 430),
     adminUsername: overrides.adminUsername || env.ADMIN_USERNAME || 'admin',
     adminPassword: overrides.adminPassword || env.ADMIN_PASSWORD || ''
   };

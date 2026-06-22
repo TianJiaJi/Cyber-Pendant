@@ -1719,6 +1719,7 @@ export function toGarmentDto(row, options = {}) {
     : null;
 
   if (owner && showContact) {
+    owner.studentName = studentName;
     owner.contactName = contactName;
     owner.contactPhone = contactPhone;
   }

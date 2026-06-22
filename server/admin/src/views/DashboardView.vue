@@ -36,27 +36,79 @@
             {{ overviewMessage }}
           </span>
 
+          <div class="user-toolbar">
+            <input
+              v-model="userSearch"
+              class="form-input user-search-input"
+              placeholder="搜索昵称、openid、用户 ID"
+            />
+            <select v-model="userStatusFilter" class="form-input user-filter-select">
+              <option value="all">全部状态</option>
+              <option value="active">正常用户</option>
+              <option value="banned">封禁用户</option>
+            </select>
+          </div>
+
           <div v-if="overviewLoading" class="empty-state">正在加载用户数据...</div>
           <div v-else-if="users.length === 0" class="empty-state">暂无用户登录记录</div>
+          <div v-else-if="filteredUsers.length === 0" class="empty-state">没有匹配的用户</div>
           <div v-else class="admin-user-list">
-            <div v-for="user in users" :key="user.id" class="admin-user-row">
-              <div>
-                <span class="admin-user-name">{{ user.nickname || '微信用户' }}</span>
-                <span class="admin-user-meta">{{ user.openid }}</span>
-                <span class="admin-user-meta">
-                  绑定 {{ user.bindingCount || 0 }} · 报失 {{ user.lostReportCount || 0 }}
-                </span>
+            <div v-for="user in filteredUsers" :key="user.id" class="admin-user-row">
+              <div class="admin-user-main">
+                <div>
+                  <span class="admin-user-name">{{ user.nickname || '微信用户' }}</span>
+                  <span class="admin-user-meta">{{ formatUserOpenid(user.openid) }}</span>
+                </div>
+                <div class="admin-user-stats">
+                  <span>
+                    <strong>{{ user.bindingCount || 0 }}</strong>
+                    绑定数
+                  </span>
+                  <span>
+                    <strong>{{ user.lostReportCount || 0 }}</strong>
+                    报失数
+                  </span>
+                  <span>
+                    <strong>{{ formatDateTime(user.lastLoginAt) }}</strong>
+                    最近登录
+                  </span>
+                </div>
               </div>
               <div class="user-row-actions">
                 <span :class="['status-pill', user.status === 'banned' ? 'inactive' : '']">
                   {{ user.status === 'banned' ? '封禁' : '正常' }}
                 </span>
+                <button class="ghost-button small-button" @click="toggleUserExpanded(user.id)">
+                  {{ isUserExpanded(user.id) ? '收起' : '查看用户' }}
+                </button>
                 <button
                   class="secondary-button small-button"
                   @click="toggleUserStatus(user)"
                 >
                   {{ user.status === 'banned' ? '解封' : '封禁' }}
                 </button>
+              </div>
+              <div v-if="isUserExpanded(user.id)" class="admin-user-detail">
+                <div>
+                  <span class="detail-label">用户 ID</span>
+                  <span class="detail-value">{{ user.id }}</span>
+                </div>
+                <div>
+                  <span class="detail-label">OpenID</span>
+                  <span class="detail-value mono-value">{{ user.openid }}</span>
+                </div>
+                <div>
+                  <span class="detail-label">创建时间</span>
+                  <span class="detail-value">{{ formatDateTime(user.createdAt) }}</span>
+                </div>
+                <div>
+                  <span class="detail-label">最近登录</span>
+                  <span class="detail-value">{{ formatDateTime(user.lastLoginAt) }}</span>
+                </div>
+                <div>
+                  <span class="detail-label">状态</span>
+                  <span class="detail-value">{{ userStatusText(user) }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -306,6 +358,9 @@ const clothes = ref([]);
 const users = ref([]);
 const stats = ref(null);
 const query = ref('');
+const userSearch = ref('');
+const userStatusFilter = ref('all');
+const expandedUserIds = ref([]);
 const loading = ref(false);
 const overviewLoading = ref(false);
 const saving = ref(false);
@@ -332,6 +387,22 @@ const summaryCards = computed(() => {
     { label: 'SN 总数', value: stats.value?.garments?.total ?? garmentCount },
     { label: '有效报失', value: stats.value?.reports?.active ?? 0 }
   ];
+});
+
+const filteredUsers = computed(() => {
+  const keyword = userSearch.value.trim().toLowerCase();
+  return users.value.filter((user) => {
+    const matchesStatus =
+      userStatusFilter.value === 'all' || user.status === userStatusFilter.value;
+    const matchesKeyword = !keyword || [
+      user.id,
+      user.nickname,
+      user.openid,
+      user.status
+    ].some((value) => String(value || '').toLowerCase().includes(keyword));
+
+    return matchesStatus && matchesKeyword;
+  });
 });
 
 onMounted(() => {
@@ -444,6 +515,36 @@ function statusText(status) {
 
 function formatDateTime(value) {
   return value ? value.replace('T', ' ').slice(0, 16) : '未记录';
+}
+
+function formatUserOpenid(value) {
+  const text = String(value || '');
+  if (text.length <= 18) {
+    return text || '未记录 openid';
+  }
+
+  return `${text.slice(0, 10)}...${text.slice(-6)}`;
+}
+
+function isUserExpanded(id) {
+  return expandedUserIds.value.includes(id);
+}
+
+function toggleUserExpanded(id) {
+  if (isUserExpanded(id)) {
+    expandedUserIds.value = expandedUserIds.value.filter((item) => item !== id);
+    return;
+  }
+
+  expandedUserIds.value = [...expandedUserIds.value, id];
+}
+
+function userStatusText(user) {
+  if (user.status !== 'banned') {
+    return '正常';
+  }
+
+  return user.bannedReason ? `封禁：${user.bannedReason}` : '封禁';
 }
 
 function splitStandardList(value) {
@@ -601,6 +702,16 @@ function goHome() {
   gap: 8px;
 }
 
+.user-toolbar {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.user-filter-select {
+  appearance: auto;
+}
+
 .admin-user-row {
   display: grid;
   gap: 8px;
@@ -610,8 +721,16 @@ function goHome() {
   background: #fbf8f2;
 }
 
+.admin-user-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .admin-user-name,
-.admin-user-meta {
+.admin-user-meta,
+.detail-label,
+.detail-value {
   display: block;
 }
 
@@ -628,11 +747,60 @@ function goHome() {
   overflow-wrap: anywhere;
 }
 
+.admin-user-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.admin-user-stats span {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #e7e0d6;
+  border-radius: 4px;
+  background: #fffdf9;
+  color: #746e65;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.admin-user-stats strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #171717;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .user-row-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+}
+
+.admin-user-detail {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border-top: 1px solid #e2dbd1;
+}
+
+.detail-label {
+  color: #746e65;
+  font-size: 11px;
+}
+
+.detail-value {
+  margin-top: 2px;
+  color: #171717;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mono-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
 }
 
 .export-grid {
@@ -962,6 +1130,16 @@ function goHome() {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     padding: 12px;
+  }
+
+  .user-toolbar {
+    grid-template-columns: minmax(0, 1fr) 160px;
+    gap: 10px;
+  }
+
+  .admin-user-detail {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .admin-user-name {

@@ -199,17 +199,41 @@
         </div>
       </div>
 
-      <div class="batches-panel">
-        <div class="records-toolbar">
-          <div>
-            <span class="section-title">批次与 SN</span>
-            <span class="toolbar-meta">{{ batches.length }} 个批次，{{ totalSnCount }} 个 SN</span>
+        <div class="batches-panel">
+          <div class="records-toolbar">
+            <div>
+              <span class="section-title">批次与 SN</span>
+              <span class="toolbar-meta">{{ batches.length }} 个批次，{{ totalSnCount }} 个 SN</span>
+            </div>
+            <button class="secondary-button" @click="loadAll">刷新</button>
           </div>
-          <button class="secondary-button" @click="loadAll">刷新</button>
-        </div>
 
-        <span v-if="snMessage" class="message-text panel-message">{{ snMessage }}</span>
-        <span v-if="pageMessage && clothing" class="message-text panel-message">{{ pageMessage }}</span>
+          <div class="qr-mode-panel">
+            <div>
+              <span class="tool-title">二维码模式</span>
+              <span class="section-copy">{{ qrModeHelp }}</span>
+            </div>
+            <div class="qr-mode-options">
+              <label
+                v-for="option in qrModeOptions"
+                :key="option.value"
+                :class="['qr-mode-option', qrMode === option.value ? 'active' : '']"
+              >
+                <input
+                  v-model="qrMode"
+                  class="qr-mode-radio"
+                  type="radio"
+                  :value="option.value"
+                  @change="setQrMode(option.value)"
+                />
+                <span class="qr-mode-label">{{ option.label }}</span>
+                <span class="qr-mode-description">{{ option.description }}</span>
+              </label>
+            </div>
+          </div>
+
+          <span v-if="snMessage" class="message-text panel-message">{{ snMessage }}</span>
+          <span v-if="pageMessage && clothing" class="message-text panel-message">{{ pageMessage }}</span>
 
         <div v-if="batchesLoading" class="empty-state">正在加载批次...</div>
         <div v-else-if="batches.length === 0" class="empty-state">
@@ -324,7 +348,7 @@
                     <span :class="['binding-status-text', record.isBound ? 'bound' : '']">
                       绑定：{{ record.isBound ? '已绑定' : '未绑定' }}
                     </span>
-                    <span>二维码：链接码</span>
+                    <span>二维码：{{ qrModeLabel }}</span>
                     <template v-if="record.isBound && isBindingExpanded(record.sn)">
                       <span>学生：{{ bindingField(record, 'studentName') }}</span>
                       <span>学校：{{ bindingField(record, 'school') }}</span>
@@ -339,7 +363,7 @@
                     <button class="secondary-button small-button" @click="openDetail(record.sn)">
                       查看
                     </button>
-                    <button class="ghost-button small-button" @click="downloadQr(record.sn, 'url')">
+                    <button class="ghost-button small-button" @click="downloadQr(record.sn)">
                       二维码
                     </button>
                     <button
@@ -391,9 +415,11 @@ import {
   deleteClothing,
   deleteGarment,
   getClothing,
+  getQrcodeMode,
   listClothingBatches,
   publicGarmentDetailUrl,
   qrcodeUrl,
+  saveQrcodeMode,
   unbindGarmentBinding as unbindGarmentBindingApi,
   updateBatch,
   updateClothing,
@@ -456,8 +482,11 @@ const exportColumns = [
   { key: 'sn', label: 'SN' },
   { key: 'batchNo', label: '批次标签' },
   { key: 'productionDate', label: '生产日期' },
-  { key: 'detailUrl', label: '详情页链接' },
-  { key: 'qrUrl', label: '二维码链接' }
+  { key: 'detailUrl', label: '详情页/小程序入口' },
+  { key: 'qrModeLabel', label: '二维码模式' },
+  { key: 'miniProgramPage', label: '小程序页面' },
+  { key: 'miniProgramScene', label: '小程序 scene' },
+  { key: 'qrUrl', label: '二维码图片链接' }
 ];
 
 const clothingId = ref('');
@@ -473,6 +502,7 @@ const editingBatchId = ref('');
 const expandedBatchIds = ref([]);
 const openBatchToolsId = ref('');
 const expandedBindingSns = ref([]);
+const qrMode = ref(getQrcodeMode());
 const pageMessage = ref('');
 const clothingMessage = ref('');
 const batchMessage = ref('');
@@ -498,6 +528,29 @@ const clothingInfoRows = computed(() => [
   { label: '洗护说明', value: clothingForm.careInstructions },
   { label: '备注', value: clothingForm.remark }
 ]);
+
+const qrModeOptions = [
+  {
+    value: 'mini-program',
+    label: '小程序码',
+    description: '推荐正式印刷，扫码进入 pages/garment/detail，scene=SN。'
+  },
+  {
+    value: 'url',
+    label: 'H5 链接码',
+    description: '用于浏览器预览和本地联调，会生成前台详情页 URL。'
+  }
+];
+
+const qrModeLabel = computed(() =>
+  qrMode.value === 'mini-program' ? '小程序码' : 'H5 链接码'
+);
+
+const qrModeHelp = computed(() =>
+  qrMode.value === 'mini-program'
+    ? '当前导出会写入小程序页面 pages/garment/detail 与 scene=SN，并下载微信小程序码图片。'
+    : '当前导出会写入 H5 详情页链接，并下载普通链接二维码。'
+);
 
 onMounted(() => {
   clothingId.value = String(route.params.id || '').trim();
@@ -1002,7 +1055,10 @@ function getExportRows(batch) {
     batchNo: batch.batchNo || record.batchNo || '',
     productionDate: batch.productionDate || record.productionDate || '',
     detailUrl: detailPageUrl(record.sn),
-    qrUrl: qrcodeUrl(record.sn, 'url')
+    qrModeLabel: qrModeLabel.value,
+    miniProgramPage: qrMode.value === 'mini-program' ? 'pages/garment/detail' : '',
+    miniProgramScene: qrMode.value === 'mini-program' ? `scene=${record.sn}` : '',
+    qrUrl: qrcodeUrl(record.sn, qrMode.value)
   }));
 }
 
@@ -1030,7 +1086,10 @@ function exportExcel(batch) {
     { wch: 22 },
     { wch: 20 },
     { wch: 14 },
-    { wch: 52 },
+    { wch: 36 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 26 },
     { wch: 52 }
   ];
   const workbook = XLSX.utils.book_new();
@@ -1050,6 +1109,10 @@ function csvCell(value) {
 }
 
 function detailPageUrl(sn) {
+  if (qrMode.value === 'mini-program') {
+    return `pages/garment/detail scene=${sn}`;
+  }
+
   return publicGarmentDetailUrl(sn);
 }
 
@@ -1159,12 +1222,16 @@ function bindingTime(record) {
   return value ? value.replace('T', ' ').slice(0, 19) : '未记录';
 }
 
-function downloadQr(sn, type) {
-  const url = qrcodeUrl(sn, type);
+function setQrMode(mode) {
+  qrMode.value = saveQrcodeMode(mode);
+}
+
+function downloadQr(sn) {
+  const url = qrcodeUrl(sn, qrMode.value);
 
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${sn}-${type}-qrcode.png`;
+  link.download = `${sn}-${qrMode.value}-qrcode.png`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -1458,6 +1525,59 @@ function logout() {
   color: #6b665f;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.qr-mode-panel {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 12px;
+  padding: 10px;
+  border: 1px solid #e1d9ce;
+  border-radius: 4px;
+  background: #fbf8f2;
+}
+
+.qr-mode-options {
+  display: grid;
+  gap: 7px;
+}
+
+.qr-mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid #ddd6cc;
+  border-radius: 4px;
+  background: #fffdf9;
+}
+
+.qr-mode-option.active {
+  border-color: #b9cbb2;
+  background: #f7fbf4;
+}
+
+.qr-mode-radio {
+  grid-row: span 2;
+  margin-top: 2px;
+}
+
+.qr-mode-label,
+.qr-mode-description {
+  display: block;
+}
+
+.qr-mode-label {
+  color: #171717;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.qr-mode-description {
+  color: #6b665f;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .editor-actions {

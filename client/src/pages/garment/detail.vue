@@ -130,9 +130,12 @@
             <text class="lost-text">
               {{ lostReport ? lostCardDescription : '只有报失后才会披露完整联系方式；未报失时后端只返回脱敏绑定信息。' }}
             </text>
-            <text v-if="revealedContact" class="lost-contact">
-              {{ revealedContact.contactName || '联系人' }} · {{ revealedContact.contactPhone }}
-            </text>
+            <view v-if="revealedContact" class="lost-contact-card">
+              <view v-for="item in disclosureRows" :key="item.label" class="lost-contact-row">
+                <text class="lost-contact-label">{{ item.label }}</text>
+                <text class="lost-contact-value">{{ item.value }}</text>
+              </view>
+            </view>
           </view>
           <view class="lost-actions">
             <button
@@ -387,6 +390,36 @@ const lostCardDescription = computed(() => {
   return `${lostDescription.value}；登录后点击查看联系方式才会披露绑定时录入的联系人和联系电话。`;
 });
 
+const disclosureRows = computed(() => {
+  if (!revealedContact.value) {
+    return [];
+  }
+
+  const schoolClass = [
+    revealedContact.value.school,
+    revealedContact.value.className
+  ].filter(Boolean).join(' · ');
+
+  return [
+    {
+      label: '学生',
+      value: revealedContact.value.studentName || '未填写学生姓名'
+    },
+    {
+      label: '学校班级',
+      value: schoolClass || '未填写学校班级'
+    },
+    {
+      label: '联系人',
+      value: revealedContact.value.contactName || '未填写联系人'
+    },
+    {
+      label: '联系电话',
+      value: revealedContact.value.contactPhone || '未填写联系电话'
+    }
+  ];
+});
+
 const bindingTitle = computed(() => {
   if (isBound.value) {
     if (!ownerInfo.value) {
@@ -479,8 +512,26 @@ const companyFields = computed(() => {
   ];
 });
 
+function normalizeSceneSn(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function resolveQuerySn(query = {}) {
+  const directSn = String(query?.sn || '').trim();
+  if (directSn) {
+    return normalizeSceneSn(directSn);
+  }
+
+  const scene = String(query?.scene || '').trim();
+  if (!scene) {
+    return '';
+  }
+
+  return normalizeSceneSn(decodeURIComponent(scene));
+}
+
 onLoad(async (query) => {
-  const sn = String(query?.sn || '').trim().toUpperCase();
+  const sn = resolveQuerySn(query);
 
   if (!sn) {
     loading.value = false;
@@ -1363,8 +1414,7 @@ async function revealContact() {
 }
 
 .lost-title,
-.lost-text,
-.lost-contact {
+.lost-text {
   display: block;
 }
 
@@ -1382,12 +1432,43 @@ async function revealContact() {
   line-height: 1.5;
 }
 
-.lost-contact {
-  margin-top: 14rpx;
-  color: #9a4b38;
+.lost-contact-card {
+  display: grid;
+  gap: 12rpx;
+  margin-top: 18rpx;
+  padding: 20rpx;
+  border: 1px solid rgba(154, 75, 56, 0.2);
+  border-radius: 8rpx;
+  background: #fff4ee;
+}
+
+.lost-contact-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.lost-contact-label,
+.lost-contact-value {
+  display: block;
+  line-height: 1.45;
+}
+
+.lost-contact-label {
+  flex: 0 0 132rpx;
+  color: #8b7c70;
+  font-size: 23rpx;
+}
+
+.lost-contact-value {
+  flex: 1;
+  min-width: 0;
+  color: #7f3727;
   font-size: 26rpx;
   font-weight: 700;
-  line-height: 1.45;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .lost-actions {

@@ -17,6 +17,10 @@ function readVueFile(relativePath) {
   return readFileSync(path.join(clientRoot, relativePath), 'utf8');
 }
 
+function readClientFile(relativePath) {
+  return readFileSync(path.join(clientRoot, relativePath), 'utf8');
+}
+
 function baseCss(css) {
   return css.split(/\n@media\b/)[0];
 }
@@ -93,4 +97,27 @@ test('user pages keep custom topbars fixed while content areas scroll', () => {
     /display:\s*grid;/,
     /grid-template-columns:\s*1fr 1fr;/
   ]);
+});
+
+test('login, user center, and authenticated user APIs are wired into the client', () => {
+  const pagesJson = JSON.parse(readClientFile('src/pages.json'));
+  const pagePaths = pagesJson.pages.map((page) => page.path);
+  const footerFile = readVueFile('src/components/AppFooter.vue');
+  const apiFile = readClientFile('src/utils/api.js');
+  const detailFile = readVueFile('src/pages/garment/detail.vue');
+  const loginFile = readVueFile('src/pages/login/index.vue');
+  const userFile = readVueFile('src/pages/user/index.vue');
+
+  assert.ok(pagePaths.includes('pages/login/index'), 'login page should be registered');
+  assert.ok(pagePaths.includes('pages/user/index'), 'user center page should be registered');
+  assert.match(footerFile, /\/pages\/user\/index/, 'footer user tab should navigate to user center');
+  assert.match(apiFile, /USER_TOKEN_KEY/, 'client API should define a user token key');
+  assert.match(apiFile, /Authorization\s*=\s*`Bearer \$\{token\}`/, 'API requests should attach user tokens');
+  assert.match(apiFile, /loginWechat/, 'client API should expose WeChat login');
+  assert.match(apiFile, /getUserGarments/, 'client API should fetch user garments');
+  assert.match(apiFile, /reportLostGarment/, 'client API should expose lost report creation');
+  assert.match(detailFile, /ensureLoggedIn/, 'binding flow should check login before opening the form');
+  assert.match(loginFile, /uni\.login/, 'login page should call the mini-program login API');
+  assert.match(userFile, /getUserGarments/, 'user center should load bound garments');
+  assert.match(userFile, /getUserLostReports/, 'user center should load lost reports');
 });

@@ -2,40 +2,65 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import QRCode from 'qrcode';
-import { createToken, verifyPassword, verifyToken } from './auth.js';
+import {
+  code2Openid,
+  createToken,
+  createUserToken,
+  verifyPassword,
+  verifyToken
+} from './auth.js';
 import { createConfig } from './config.js';
 import {
   bindGarmentOwner,
+  closeLostReport,
+  createLostReport,
   deleteBatchHard,
   deleteClothingHard,
   deleteGarmentHard,
+  exportRows,
   findAdminByUsername,
+  findActiveLostReportByGarmentId,
   findBatchById,
   findClothingById,
   findGarmentBySn,
   findGarmentDetailBySn,
+  findUserById,
+  findUserByOpenid,
+  getAdminStats,
   incrementGarmentQueryCount,
   insertBatch,
   insertClothing,
   insertGarment,
+  listAdminUsers,
   listBatchesByClothingId,
   listClothes,
   listGarments,
   listGarmentsByBatchId,
+  listUserBindingLogs,
+  listUserGarments,
+  listUserLostReports,
   migrateDatabase,
   normalizeBatchInput,
   normalizeClothingInput,
   normalizeGarmentInput,
   openDatabase,
+  recordContactReveal,
   setBatchStatus,
   setClothingStatus,
+  setUserStatus,
   toBatchDto,
+  toBindingLogDto,
   toClothingDto,
   toGarmentDto,
+  toLostReportDto,
+  toUserDto,
   unbindGarmentOwner,
   updateBatch,
   updateClothing,
   updateGarment,
+  updateGarmentOwnerBinding,
+  updateUserLastLogin,
+  createUser,
   validateBatchForCreate,
   validateClothingForCreate
 } from './db.js';
@@ -91,16 +116,54 @@ async function readJson(req) {
   }
 }
 
-function requireAdmin(req, config) {
+function bearerToken(req) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+}
+
+function requireAdmin(req, config) {
+  const token = bearerToken(req);
   const payload = verifyToken(token, config.tokenSecret);
 
-  if (!payload) {
+  if (!payload || (payload.type && payload.type !== 'admin')) {
     throw new HttpError(401, '请先登录后台');
   }
 
   return payload;
+}
+
+function requireUser(req, config) {
+  const token = bearerToken(req);
+  const payload = verifyToken(token, config.userTokenSecret);
+
+  if (!payload || payload.type !== 'user') {
+    throw new HttpError(401, '请先登录');
+  }
+
+  return payload;
+}
+
+function readActor(req, config) {
+  const token = bearerToken(req);
+  const user = verifyToken(token, config.userTokenSecret);
+
+  if (user?.type === 'user') {
+    return { type: 'user', payload: user };
+  }
+
+  const admin = verifyToken(token, config.tokenSecret);
+  if (admin && (!admin.type || admin.type === 'admin')) {
+    return { type: 'admin', payload: admin };
+  }
+
+  throw new HttpError(401, '请先登录');
+}
+
+function requestMeta(req) {
+  return {
+    ipAddress: req.headers['x-forwarded-for'] || req.socket.remoteAddress || null,
+    userAgent: req.headers['user-agent'] || null
+  };
 }
 
 function detailUrl(config, sn) {
@@ -132,6 +195,16 @@ function parseClothingBatchesPath(pathname) {
 
 function parseGarmentBindingPath(pathname) {
   const match = pathname.match(/^\/api\/garments\/([^/]+)\/binding$/);
+  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+}
+
+function parseGarmentLostReportPath(pathname) {
+  const match = pathname.match(/^\/api\/garments\/([^/]+)\/report-lost$/);
+  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+}
+
+function parseGarmentContactRevealPath(pathname) {
+  const match = pathname.match(/^\/api\/garments\/([^/]+)\/contact-reveal$/);
   return match ? normalizeSn(decodeURIComponent(match[1])) : null;
 }
 
@@ -331,6 +404,67 @@ async function handleLogin(req, res, context) {
   });
 }
 
+async function handleWechatLogin(req, res, context) {
+  const body = await readJson(req);
+  const code = String(body.code || '').trim();
+
+  if (!code) {
+    throw new HttpError(400, '缺少微信登录 code');
+  }
+
+  const code2Session = context.config.wechatCode2Session || code2Openid;
+  let wechatResult;
+  try {
+    wechatResult = await code2Session(
+      code,
+      context.config.wechatAppId,
+      context.config.wechatAppSecret
+    );
+  } catch (error) {
+    throw new HttpError(error.status || 401, error.message || '微信登录失败', error.details);
+  }
+
+  if (wechatResult.errcode) {
+    throw new HttpError(401, wechatResult.errmsg || '微信登录失败', {
+      errcode: wechatResult.errcode
+    });
+  }
+
+  const openid = String(wechatResult.openid || '').trim();
+  if (!openid) {
+    throw new HttpError(502, '微信登录未返回 openid');
+  }
+
+  let user = findUserByOpenid(context.db, openid);
+  let isNewUser = false;
+
+  if (!user) {
+    user = createUser(context.db, {
+      openid,
+      nickname: '微信用户',
+      status: 'active'
+    });
+    isNewUser = true;
+  }
+
+  if (user.status === 'banned') {
+    throw new HttpError(403, '该用户已被禁用');
+  }
+
+  user = updateUserLastLogin(context.db, user.id);
+  const token = createUserToken(
+    user,
+    context.config.userTokenSecret,
+    context.config.userTokenTtlDays
+  );
+
+  sendJson(req, res, context.config, 200, {
+    token,
+    user: toUserDto(user),
+    isNewUser
+  });
+}
+
 function shouldTrackLookup(searchParams) {
   const track = searchParams.get('track');
   return track !== '0' && track !== 'false';
@@ -388,6 +522,15 @@ function normalizeBindingInput(body) {
 }
 
 function handlePublicGarment(req, res, context, sn, searchParams) {
+  let viewerUserId = null;
+  try {
+    viewerUserId = requireUser(req, context.config).sub;
+  } catch (error) {
+    if (error.status !== 401) {
+      throw error;
+    }
+  }
+
   let row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
@@ -398,7 +541,7 @@ function handlePublicGarment(req, res, context, sn, searchParams) {
     row = incrementGarmentQueryCount(context.db, sn);
   }
 
-  const garment = toGarmentDto(row);
+  const garment = toGarmentDto(row, { viewerUserId });
   if (garment.status !== 'active') {
     sendJson(req, res, context.config, 423, {
       message: '该吊牌已停用',
@@ -411,6 +554,7 @@ function handlePublicGarment(req, res, context, sn, searchParams) {
 }
 
 async function handleBindGarment(req, res, context, sn) {
+  const userPayload = requireUser(req, context.config);
   const row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
@@ -427,29 +571,259 @@ async function handleBindGarment(req, res, context, sn) {
   }
 
   const binding = normalizeBindingInput(await readJson(req));
-  const updated = bindGarmentOwner(context.db, sn, binding);
+  const updated = bindGarmentOwner(context.db, sn, binding, {
+    userId: userPayload.sub,
+    actorType: 'user',
+    ...requestMeta(req)
+  });
 
   if (!updated.changed) {
     throw new HttpError(409, '该吊牌已绑定学生信息');
   }
 
   sendJson(req, res, context.config, 200, {
-    garment: toGarmentDto(updated.garment)
+    garment: toGarmentDto(updated.garment, {
+      privateBinding: true,
+      viewerUserId: userPayload.sub
+    })
   });
 }
 
-function handleUnbindGarment(req, res, context, sn) {
-  requireAdmin(req, context.config);
+async function handleUpdateBinding(req, res, context, sn) {
+  const userPayload = requireUser(req, context.config);
   const row = findGarmentDetailBySn(context.db, sn);
 
   if (!row) {
     throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
   }
 
-  const updated = unbindGarmentOwner(context.db, sn);
-  sendJson(req, res, context.config, 200, {
-    garment: toGarmentDto(updated.garment, { privateBinding: true })
+  if (!row.owner_bound_at || !row.bound_by_user_id) {
+    throw new HttpError(409, '该吊牌尚未绑定学生信息');
+  }
+
+  if (Number(row.bound_by_user_id) !== Number(userPayload.sub)) {
+    throw new HttpError(403, '只有绑定用户可以修改绑定信息');
+  }
+
+  const binding = normalizeBindingInput(await readJson(req));
+  const updated = updateGarmentOwnerBinding(context.db, sn, binding, {
+    userId: userPayload.sub,
+    actorType: 'user',
+    ...requestMeta(req)
   });
+
+  sendJson(req, res, context.config, 200, {
+    garment: toGarmentDto(updated.garment, {
+      privateBinding: true,
+      viewerUserId: userPayload.sub
+    })
+  });
+}
+
+function handleUnbindGarment(req, res, context, sn) {
+  const actor = readActor(req, context.config);
+  const row = findGarmentDetailBySn(context.db, sn);
+
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  if (
+    actor.type === 'user' &&
+    (!row.bound_by_user_id || Number(row.bound_by_user_id) !== Number(actor.payload.sub))
+  ) {
+    throw new HttpError(403, '只有绑定用户可以解绑');
+  }
+
+  const updated = unbindGarmentOwner(context.db, sn, {
+    userId: actor.type === 'user' ? actor.payload.sub : row.bound_by_user_id,
+    actorType: actor.type,
+    ...requestMeta(req)
+  });
+  sendJson(req, res, context.config, 200, {
+    garment: toGarmentDto(updated.garment, {
+      privateBinding: true,
+      viewerUserId: actor.type === 'user' ? actor.payload.sub : null
+    })
+  });
+}
+
+function handleUserGarments(req, res, context) {
+  const userPayload = requireUser(req, context.config);
+  const garments = listUserGarments(context.db, userPayload.sub).map((row) =>
+    toGarmentDto(row, { viewerUserId: userPayload.sub })
+  );
+
+  sendJson(req, res, context.config, 200, { garments });
+}
+
+function handleUserBindingLogs(req, res, context) {
+  const userPayload = requireUser(req, context.config);
+  const logs = listUserBindingLogs(context.db, userPayload.sub).map(toBindingLogDto);
+
+  sendJson(req, res, context.config, 200, { logs });
+}
+
+function handleUserLostReports(req, res, context) {
+  const userPayload = requireUser(req, context.config);
+  const reports = listUserLostReports(context.db, userPayload.sub).map(toLostReportDto);
+
+  sendJson(req, res, context.config, 200, { reports });
+}
+
+async function handleCreateLostReport(req, res, context, sn) {
+  const userPayload = requireUser(req, context.config);
+  const row = findGarmentDetailBySn(context.db, sn);
+
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  if (!row.bound_by_user_id || Number(row.bound_by_user_id) !== Number(userPayload.sub)) {
+    throw new HttpError(403, '只有绑定用户可以报告丢失');
+  }
+
+  const body = await readJson(req);
+  const report = createLostReport(context.db, sn, userPayload.sub, body.note);
+  const garment = findGarmentDetailBySn(context.db, sn);
+
+  sendJson(req, res, context.config, 201, {
+    report: toLostReportDto(report),
+    garment: toGarmentDto(garment, { viewerUserId: userPayload.sub })
+  });
+}
+
+function handleCloseLostReport(req, res, context, sn) {
+  const actor = readActor(req, context.config);
+  const row = findGarmentDetailBySn(context.db, sn);
+
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  const activeReport = findActiveLostReportByGarmentId(context.db, row.id);
+  if (!activeReport) {
+    throw new HttpError(404, '没有有效的丢失报告');
+  }
+
+  if (
+    actor.type === 'user' &&
+    Number(activeReport.reporter_id) !== Number(actor.payload.sub)
+  ) {
+    throw new HttpError(403, '只有报告用户可以取消报失');
+  }
+
+  const report = closeLostReport(context.db, sn, {
+    status: 'cancelled',
+    reason: actor.type === 'admin' ? 'admin_cancelled' : 'cancelled'
+  });
+
+  sendJson(req, res, context.config, 200, { report: toLostReportDto(report) });
+}
+
+async function handleContactReveal(req, res, context, sn) {
+  let userPayload = null;
+  try {
+    userPayload = requireUser(req, context.config);
+  } catch (error) {
+    if (error.status !== 401) {
+      throw error;
+    }
+  }
+
+  const row = findGarmentDetailBySn(context.db, sn);
+  if (!row) {
+    throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
+  }
+
+  const activeReport = findActiveLostReportByGarmentId(context.db, row.id);
+  if (!activeReport) {
+    throw new HttpError(404, '没有有效的丢失报告');
+  }
+
+  const body = await readJson(req);
+  const updated = recordContactReveal(context.db, sn, {
+    userId: userPayload?.sub,
+    source: body.source,
+    ...requestMeta(req)
+  });
+  const garment = toGarmentDto(updated, { showContact: true });
+
+  sendJson(req, res, context.config, 200, {
+    contact: {
+      contactName: garment.owner?.contactName || null,
+      contactPhone: garment.owner?.contactPhone || null
+    },
+    garment
+  });
+}
+
+function escapeCsvValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function sendCsv(req, res, context, filename, rows) {
+  setCorsHeaders(req, res, context.config);
+  const columns = rows.length ? Object.keys(rows[0]) : [];
+  const body = [
+    columns.join(','),
+    ...rows.map((row) => columns.map((column) => escapeCsvValue(row[column])).join(','))
+  ].join('\n');
+
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`
+  });
+  res.end(`\uFEFF${body}`);
+}
+
+function handleAdminUsers(req, res, context) {
+  requireAdmin(req, context.config);
+  const users = listAdminUsers(context.db).map(toUserDto);
+  sendJson(req, res, context.config, 200, { users });
+}
+
+function handleAdminUserDetail(req, res, context, userId) {
+  requireAdmin(req, context.config);
+  const user = findUserById(context.db, userId);
+
+  if (!user) {
+    throw new HttpError(404, '未找到用户');
+  }
+
+  sendJson(req, res, context.config, 200, { user: toUserDto(user) });
+}
+
+function handleAdminUserStatus(req, res, context, userId, status) {
+  requireAdmin(req, context.config);
+  const user = setUserStatus(context.db, userId, status);
+
+  if (!user) {
+    throw new HttpError(404, '未找到用户');
+  }
+
+  sendJson(req, res, context.config, 200, { user: toUserDto(user) });
+}
+
+function handleAdminStats(req, res, context) {
+  requireAdmin(req, context.config);
+  sendJson(req, res, context.config, 200, getAdminStats(context.db));
+}
+
+function handleAdminExport(req, res, context, type) {
+  requireAdmin(req, context.config);
+  const rows = exportRows(context.db, type);
+
+  if (!rows) {
+    throw new HttpError(404, '不支持的导出类型');
+  }
+
+  sendCsv(req, res, context, `${type}.csv`, rows);
 }
 
 async function handleCreateClothing(req, res, context) {
@@ -740,6 +1114,60 @@ async function route(req, res, context) {
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/api/auth/wechat/login') {
+    await handleWechatLogin(req, res, context);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/user/garments') {
+    handleUserGarments(req, res, context);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/user/lost-reports') {
+    handleUserLostReports(req, res, context);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/user/binding-logs') {
+    handleUserBindingLogs(req, res, context);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/users') {
+    handleAdminUsers(req, res, context);
+    return;
+  }
+
+  const adminUserActionMatch = pathname.match(/^\/api\/admin\/users\/(\d+)\/(ban|unban)$/);
+  if (adminUserActionMatch && req.method === 'POST') {
+    handleAdminUserStatus(
+      req,
+      res,
+      context,
+      Number(adminUserActionMatch[1]),
+      adminUserActionMatch[2] === 'ban' ? 'banned' : 'active'
+    );
+    return;
+  }
+
+  const adminUserId = parsePathId(pathname, '/api/admin/users/');
+  if (adminUserId && req.method === 'GET') {
+    handleAdminUserDetail(req, res, context, adminUserId);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/stats') {
+    handleAdminStats(req, res, context);
+    return;
+  }
+
+  const adminExportMatch = pathname.match(/^\/api\/admin\/export\/([a-z-]+)$/);
+  if (adminExportMatch && req.method === 'GET') {
+    handleAdminExport(req, res, context, adminExportMatch[1]);
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/clothes') {
     requireAdmin(req, context.config);
     const rows = listClothes(context.db, searchParams.get('q') || '');
@@ -841,8 +1269,30 @@ async function route(req, res, context) {
     return;
   }
 
+  if (bindingSn && req.method === 'PUT') {
+    await handleUpdateBinding(req, res, context, bindingSn);
+    return;
+  }
+
   if (bindingSn && req.method === 'DELETE') {
     handleUnbindGarment(req, res, context, bindingSn);
+    return;
+  }
+
+  const lostReportSn = parseGarmentLostReportPath(pathname);
+  if (lostReportSn && req.method === 'POST') {
+    await handleCreateLostReport(req, res, context, lostReportSn);
+    return;
+  }
+
+  if (lostReportSn && req.method === 'DELETE') {
+    handleCloseLostReport(req, res, context, lostReportSn);
+    return;
+  }
+
+  const contactRevealSn = parseGarmentContactRevealPath(pathname);
+  if (contactRevealSn && req.method === 'POST') {
+    await handleContactReveal(req, res, context, contactRevealSn);
     return;
   }
 

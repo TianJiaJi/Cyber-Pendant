@@ -166,6 +166,50 @@ export function unbindGarmentBinding(sn) {
   });
 }
 
+export function getAdminStats() {
+  return request('/api/admin/stats');
+}
+
+export function listAdminUsers() {
+  return request('/api/admin/users');
+}
+
+export function banAdminUser(id) {
+  return request(`/api/admin/users/${encodeURIComponent(id)}/ban`, {
+    method: 'POST'
+  });
+}
+
+export function unbanAdminUser(id) {
+  return request(`/api/admin/users/${encodeURIComponent(id)}/unban`, {
+    method: 'POST'
+  });
+}
+
+export async function downloadAdminExport(type) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const response = await fetch(`${API_BASE_URL}/api/admin/export/${encodeURIComponent(type)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+
+  if (!response.ok) {
+    throw {
+      statusCode: response.status,
+      message: '导出失败'
+    };
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${type}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export function publicGarmentDetailUrl(sn) {
   const baseUrl = FRONTEND_BASE_URL.replace(/\/$/, '');
   return `${baseUrl}/#/pages/garment/detail?sn=${encodeURIComponent(sn)}`;

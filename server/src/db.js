@@ -45,6 +45,8 @@ const CLOTHING_COLUMNS = Object.values(CLOTHING_FIELD_MAP);
 const BATCH_COLUMNS = Object.values(BATCH_FIELD_MAP);
 const LEGACY_GARMENT_COLUMNS = Object.values(FIELD_MAP);
 const VALID_STATUSES = new Set(['active', 'inactive']);
+const VALID_USER_STATUSES = new Set(['active', 'banned']);
+const LOST_REPORT_TTL_DAYS = 30;
 
 function nowIso() {
   return new Date().toISOString();
@@ -66,6 +68,10 @@ function cleanPositiveInteger(value) {
 
 function normalizeStatus(value, fallback = 'active') {
   return VALID_STATUSES.has(value) ? value : fallback;
+}
+
+function normalizeUserStatus(value, fallback = 'active') {
+  return VALID_USER_STATUSES.has(value) ? value : fallback;
 }
 
 function tableExists(db, tableName) {
@@ -102,6 +108,22 @@ export function migrateDatabase(db, config) {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      openid TEXT NOT NULL UNIQUE,
+      nickname TEXT,
+      avatar_url TEXT,
+      phone TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      banned_at TEXT,
+      banned_reason TEXT,
+      binding_count INTEGER NOT NULL DEFAULT 0,
+      lost_report_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS garment_styles (
@@ -181,16 +203,70 @@ export function migrateDatabase(db, config) {
       owner_name TEXT,
       owner_phone_tail TEXT,
       owner_bound_at TEXT,
+      bound_by_user_id INTEGER,
+      lost_report_id INTEGER,
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS binding_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+      garment_sn TEXT NOT NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_type TEXT NOT NULL DEFAULT 'user',
+      action TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      before_data TEXT,
+      after_data TEXT,
+      changed_fields TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS lost_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+      garment_sn TEXT NOT NULL,
+      reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      note TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      view_count INTEGER NOT NULL DEFAULT 0,
+      contact_reveal_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT NOT NULL,
+      closed_at TEXT,
+      close_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS contact_reveal_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+      garment_sn TEXT NOT NULL,
+      lost_report_id INTEGER REFERENCES lost_reports(id) ON DELETE SET NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      source TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_openid ON users(openid);
+    CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
     CREATE INDEX IF NOT EXISTS idx_clothes_status ON clothes(status);
     CREATE INDEX IF NOT EXISTS idx_garment_batches_clothing_id ON garment_batches(clothing_id);
     CREATE INDEX IF NOT EXISTS idx_garment_batches_status ON garment_batches(status);
     CREATE INDEX IF NOT EXISTS idx_garments_sn ON garments(sn);
     CREATE INDEX IF NOT EXISTS idx_garments_status ON garments(status);
+    CREATE INDEX IF NOT EXISTS idx_binding_logs_garment ON binding_logs(garment_id);
+    CREATE INDEX IF NOT EXISTS idx_binding_logs_user ON binding_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_binding_logs_created ON binding_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_lost_reports_garment ON lost_reports(garment_id);
+    CREATE INDEX IF NOT EXISTS idx_lost_reports_reporter ON lost_reports(reporter_id);
+    CREATE INDEX IF NOT EXISTS idx_lost_reports_status ON lost_reports(status);
+    CREATE INDEX IF NOT EXISTS idx_contact_reveal_logs_garment ON contact_reveal_logs(garment_id);
   `);
 
   ensureGarmentColumn(db, 'clothing_id');
@@ -198,10 +274,14 @@ export function migrateDatabase(db, config) {
   ensureGarmentColumn(db, 'style_id');
   ensureGarmentQueryCountColumn(db);
   ensureGarmentBindingColumns(db);
+  ensureGarmentIntegerColumn(db, 'bound_by_user_id');
+  ensureGarmentIntegerColumn(db, 'lost_report_id');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_garments_clothing_id ON garments(clothing_id);
     CREATE INDEX IF NOT EXISTS idx_garments_batch_id ON garments(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_garments_bound_by ON garments(bound_by_user_id);
+    CREATE INDEX IF NOT EXISTS idx_garments_lost_report ON garments(lost_report_id);
   `);
 
   seedAdmin(db, config);
@@ -213,6 +293,10 @@ function ensureGarmentColumn(db, columnName) {
   if (!columnExists(db, 'garments', columnName)) {
     db.exec(`ALTER TABLE garments ADD COLUMN ${columnName} INTEGER;`);
   }
+}
+
+function ensureGarmentIntegerColumn(db, columnName) {
+  ensureGarmentColumn(db, columnName);
 }
 
 function ensureGarmentQueryCountColumn(db) {
@@ -300,6 +384,142 @@ function seedDemoData(db) {
 
 export function findAdminByUsername(db, username) {
   return db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+}
+
+export function findUserByOpenid(db, openid) {
+  return db.prepare('SELECT * FROM users WHERE openid = ?').get(openid);
+}
+
+export function findUserById(db, id) {
+  const userId = cleanPositiveInteger(id);
+
+  if (!userId) {
+    return null;
+  }
+
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+}
+
+export function createUser(db, input) {
+  const timestamp = nowIso();
+  const result = db
+    .prepare(
+      `INSERT INTO users (
+         openid,
+         nickname,
+         avatar_url,
+         phone,
+         status,
+         created_at,
+         updated_at,
+         last_login_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      cleanString(input.openid),
+      cleanString(input.nickname) || '微信用户',
+      cleanString(input.avatarUrl || input.avatar_url),
+      cleanString(input.phone),
+      normalizeUserStatus(input.status),
+      timestamp,
+      timestamp,
+      timestamp
+    );
+
+  return findUserById(db, Number(result.lastInsertRowid));
+}
+
+export function updateUserLastLogin(db, userId) {
+  const timestamp = nowIso();
+  db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(
+    timestamp,
+    timestamp,
+    userId
+  );
+
+  return findUserById(db, userId);
+}
+
+export function setUserStatus(db, userId, status, reason = null) {
+  const id = cleanPositiveInteger(userId);
+
+  if (!id) {
+    return null;
+  }
+
+  const normalized = normalizeUserStatus(status);
+  const timestamp = nowIso();
+  db.prepare(
+    `UPDATE users
+     SET status = ?,
+         banned_at = ?,
+         banned_reason = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(
+    normalized,
+    normalized === 'banned' ? timestamp : null,
+    normalized === 'banned' ? cleanString(reason) : null,
+    timestamp,
+    id
+  );
+
+  return findUserById(db, id);
+}
+
+function desensitizePhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+
+  if (digits.length < 7) {
+    return digits || null;
+  }
+
+  return `${digits.slice(0, 3)}****${digits.slice(-4)}`;
+}
+
+export function toUserDto(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    openid: user.openid,
+    nickname: user.nickname || '微信用户',
+    avatarUrl: user.avatar_url || null,
+    phone: user.phone ? desensitizePhone(user.phone) : null,
+    status: user.status,
+    bindingCount: Number(user.binding_count || 0),
+    lostReportCount: Number(user.lost_report_count || 0),
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
+    lastLoginAt: user.last_login_at
+  };
+}
+
+function refreshUserCounts(db, userId) {
+  const id = cleanPositiveInteger(userId);
+
+  if (!id) {
+    return;
+  }
+
+  const timestamp = nowIso();
+  db.prepare(
+    `UPDATE users
+     SET binding_count = (
+           SELECT COUNT(*)
+           FROM garments
+           WHERE bound_by_user_id = users.id AND owner_bound_at IS NOT NULL
+         ),
+         lost_report_count = (
+           SELECT COUNT(*)
+           FROM lost_reports
+           WHERE reporter_id = users.id AND status = 'active' AND datetime(expires_at) > datetime('now')
+         ),
+         updated_at = ?
+     WHERE id = ?`
+  ).run(timestamp, id);
 }
 
 export function normalizeClothingInput(input = {}, options = {}) {
@@ -696,8 +916,60 @@ export function incrementGarmentQueryCount(db, sn) {
   return findGarmentDetailBySn(db, sn);
 }
 
-export function bindGarmentOwner(db, sn, binding) {
+function bindingSnapshot(row) {
+  if (!row || !(row.owner_bound_at || row.student_name || row.bound_by_user_id)) {
+    return null;
+  }
+
+  return {
+    studentName: row.student_name || row.owner_name,
+    studentSchool: row.student_school,
+    studentClass: row.student_class,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    boundByUserId: row.bound_by_user_id,
+    boundAt: row.owner_bound_at
+  };
+}
+
+function insertBindingLog(db, input) {
+  db.prepare(
+    `INSERT INTO binding_logs (
+       garment_id,
+       garment_sn,
+       user_id,
+       actor_type,
+       action,
+       ip_address,
+       user_agent,
+       before_data,
+       after_data,
+       changed_fields,
+       created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.garmentId,
+    input.garmentSn,
+    input.userId || null,
+    input.actorType || 'user',
+    input.action,
+    input.ipAddress || null,
+    input.userAgent || null,
+    input.beforeData ? JSON.stringify(input.beforeData) : null,
+    input.afterData ? JSON.stringify(input.afterData) : null,
+    input.changedFields ? JSON.stringify(input.changedFields) : null,
+    nowIso()
+  );
+}
+
+function bindingChangedFields(before, after) {
+  const fields = ['studentName', 'studentSchool', 'studentClass', 'contactName', 'contactPhone'];
+  return fields.filter((field) => before?.[field] !== after?.[field]);
+}
+
+export function bindGarmentOwner(db, sn, binding, options = {}) {
   const timestamp = nowIso();
+  const beforeRow = findGarmentDetailBySn(db, sn);
   const result = db
     .prepare(
       `UPDATE garments
@@ -709,8 +981,9 @@ export function bindGarmentOwner(db, sn, binding) {
            owner_name = ?,
            owner_phone_tail = ?,
            owner_bound_at = ?,
+           bound_by_user_id = ?,
            updated_at = ?
-       WHERE sn = ? AND owner_bound_at IS NULL AND student_name IS NULL`
+       WHERE sn = ? AND owner_bound_at IS NULL AND student_name IS NULL AND bound_by_user_id IS NULL`
     )
     .run(
       binding.studentName,
@@ -721,18 +994,87 @@ export function bindGarmentOwner(db, sn, binding) {
       binding.ownerName,
       binding.ownerPhoneTail,
       timestamp,
+      options.userId || null,
       timestamp,
       sn
     );
+  const garment = findGarmentDetailBySn(db, sn);
+
+  if (result.changes > 0) {
+    insertBindingLog(db, {
+      garmentId: garment.id,
+      garmentSn: garment.sn,
+      userId: options.userId,
+      actorType: options.actorType || 'user',
+      action: 'bind',
+      ipAddress: options.ipAddress,
+      userAgent: options.userAgent,
+      beforeData: bindingSnapshot(beforeRow),
+      afterData: bindingSnapshot(garment),
+      changedFields: bindingChangedFields(bindingSnapshot(beforeRow), bindingSnapshot(garment))
+    });
+    refreshUserCounts(db, options.userId);
+  }
 
   return {
     changed: result.changes > 0,
-    garment: findGarmentDetailBySn(db, sn)
+    garment
   };
 }
 
-export function unbindGarmentOwner(db, sn) {
+export function updateGarmentOwnerBinding(db, sn, binding, options = {}) {
   const timestamp = nowIso();
+  const beforeRow = findGarmentDetailBySn(db, sn);
+  const result = db
+    .prepare(
+      `UPDATE garments
+       SET student_name = ?,
+           student_school = ?,
+           student_class = ?,
+           contact_name = ?,
+           contact_phone = ?,
+           owner_name = ?,
+           owner_phone_tail = ?,
+           updated_at = ?
+       WHERE sn = ? AND owner_bound_at IS NOT NULL`
+    )
+    .run(
+      binding.studentName,
+      binding.studentSchool,
+      binding.studentClass,
+      binding.contactName,
+      binding.contactPhone,
+      binding.ownerName,
+      binding.ownerPhoneTail,
+      timestamp,
+      sn
+    );
+  const garment = findGarmentDetailBySn(db, sn);
+
+  if (result.changes > 0) {
+    insertBindingLog(db, {
+      garmentId: garment.id,
+      garmentSn: garment.sn,
+      userId: options.userId,
+      actorType: options.actorType || 'user',
+      action: 'modify',
+      ipAddress: options.ipAddress,
+      userAgent: options.userAgent,
+      beforeData: bindingSnapshot(beforeRow),
+      afterData: bindingSnapshot(garment),
+      changedFields: bindingChangedFields(bindingSnapshot(beforeRow), bindingSnapshot(garment))
+    });
+  }
+
+  return {
+    changed: result.changes > 0,
+    garment
+  };
+}
+
+export function unbindGarmentOwner(db, sn, options = {}) {
+  const timestamp = nowIso();
+  const beforeRow = findGarmentDetailBySn(db, sn);
   const result = db
     .prepare(
       `UPDATE garments
@@ -744,15 +1086,325 @@ export function unbindGarmentOwner(db, sn) {
            owner_name = NULL,
            owner_phone_tail = NULL,
            owner_bound_at = NULL,
+           bound_by_user_id = NULL,
+           lost_report_id = NULL,
            updated_at = ?
        WHERE sn = ?`
     )
     .run(timestamp, sn);
+  const garment = findGarmentDetailBySn(db, sn);
+
+  if (result.changes > 0) {
+    db.prepare(
+      `UPDATE lost_reports
+       SET status = 'cancelled',
+           closed_at = ?,
+           close_reason = 'binding_removed',
+           updated_at = ?
+       WHERE garment_id = ? AND status = 'active'`
+    ).run(timestamp, timestamp, beforeRow.id);
+    insertBindingLog(db, {
+      garmentId: beforeRow.id,
+      garmentSn: beforeRow.sn,
+      userId: options.userId || beforeRow.bound_by_user_id,
+      actorType: options.actorType || 'user',
+      action: 'unbind',
+      ipAddress: options.ipAddress,
+      userAgent: options.userAgent,
+      beforeData: bindingSnapshot(beforeRow),
+      afterData: null,
+      changedFields: Object.keys(bindingSnapshot(beforeRow) || {})
+    });
+    refreshUserCounts(db, options.userId || beforeRow.bound_by_user_id);
+  }
 
   return {
     changed: result.changes > 0,
-    garment: findGarmentDetailBySn(db, sn)
+    garment
   };
+}
+
+export function listUserGarments(db, userId) {
+  const id = cleanPositiveInteger(userId);
+
+  if (!id) {
+    return [];
+  }
+
+  return db
+    .prepare(
+      `SELECT sn
+       FROM garments
+       WHERE bound_by_user_id = ?
+       ORDER BY owner_bound_at DESC, id DESC`
+    )
+    .all(id)
+    .map((row) => findGarmentDetailBySn(db, row.sn));
+}
+
+export function listUserBindingLogs(db, userId) {
+  const id = cleanPositiveInteger(userId);
+
+  if (!id) {
+    return [];
+  }
+
+  return db
+    .prepare(
+      `SELECT *
+       FROM binding_logs
+       WHERE user_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 200`
+    )
+    .all(id);
+}
+
+export function createLostReport(db, sn, reporterId, note = null) {
+  const garment = findGarmentDetailBySn(db, sn);
+  const timestamp = nowIso();
+  const expiresAt = new Date(Date.now() + LOST_REPORT_TTL_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString();
+
+  db.prepare(
+    `UPDATE lost_reports
+     SET status = 'cancelled',
+         closed_at = ?,
+         close_reason = 'replaced',
+         updated_at = ?
+     WHERE garment_id = ? AND status = 'active'`
+  ).run(timestamp, timestamp, garment.id);
+
+  const result = db
+    .prepare(
+      `INSERT INTO lost_reports (
+         garment_id,
+         garment_sn,
+         reporter_id,
+         note,
+         status,
+         expires_at,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
+    )
+    .run(garment.id, garment.sn, reporterId, cleanString(note), expiresAt, timestamp, timestamp);
+
+  db.prepare('UPDATE garments SET lost_report_id = ?, updated_at = ? WHERE id = ?').run(
+    Number(result.lastInsertRowid),
+    timestamp,
+    garment.id
+  );
+  refreshUserCounts(db, reporterId);
+
+  return findLostReportById(db, Number(result.lastInsertRowid));
+}
+
+export function findLostReportById(db, id) {
+  const reportId = cleanPositiveInteger(id);
+
+  if (!reportId) {
+    return null;
+  }
+
+  return db.prepare('SELECT * FROM lost_reports WHERE id = ?').get(reportId);
+}
+
+export function findActiveLostReportByGarmentId(db, garmentId) {
+  const id = cleanPositiveInteger(garmentId);
+
+  if (!id) {
+    return null;
+  }
+
+  return db
+    .prepare(
+      `SELECT *
+       FROM lost_reports
+       WHERE garment_id = ?
+         AND status = 'active'
+         AND datetime(expires_at) > datetime('now')
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    )
+    .get(id);
+}
+
+export function closeLostReport(db, sn, options = {}) {
+  const garment = findGarmentDetailBySn(db, sn);
+  const active = findActiveLostReportByGarmentId(db, garment.id);
+
+  if (!active) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  db.prepare(
+    `UPDATE lost_reports
+     SET status = ?,
+         closed_at = ?,
+         close_reason = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(options.status || 'cancelled', timestamp, options.reason || 'cancelled', timestamp, active.id);
+  db.prepare('UPDATE garments SET lost_report_id = NULL, updated_at = ? WHERE id = ?').run(
+    timestamp,
+    garment.id
+  );
+  refreshUserCounts(db, active.reporter_id);
+
+  return findLostReportById(db, active.id);
+}
+
+export function listUserLostReports(db, userId) {
+  const id = cleanPositiveInteger(userId);
+
+  if (!id) {
+    return [];
+  }
+
+  return db
+    .prepare(
+      `SELECT lr.*, g.sn
+       FROM lost_reports lr
+       JOIN garments g ON g.id = lr.garment_id
+       WHERE lr.reporter_id = ?
+       ORDER BY lr.created_at DESC, lr.id DESC
+       LIMIT 200`
+    )
+    .all(id);
+}
+
+export function recordContactReveal(db, sn, options = {}) {
+  const garment = findGarmentDetailBySn(db, sn);
+  const report = findActiveLostReportByGarmentId(db, garment.id);
+
+  if (!report) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  db.prepare(
+    `UPDATE lost_reports
+     SET contact_reveal_count = contact_reveal_count + 1,
+         view_count = view_count + 1,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(timestamp, report.id);
+  db.prepare(
+    `INSERT INTO contact_reveal_logs (
+       garment_id,
+       garment_sn,
+       lost_report_id,
+       user_id,
+       source,
+       ip_address,
+       user_agent,
+       created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    garment.id,
+    garment.sn,
+    report.id,
+    options.userId || null,
+    cleanString(options.source),
+    options.ipAddress || null,
+    options.userAgent || null,
+    timestamp
+  );
+
+  return findGarmentDetailBySn(db, sn);
+}
+
+export function listAdminUsers(db) {
+  return db
+    .prepare(
+      `SELECT *
+       FROM users
+       ORDER BY created_at DESC, id DESC
+       LIMIT 500`
+    )
+    .all();
+}
+
+export function getAdminStats(db) {
+  const users = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN status = 'banned' THEN 1 ELSE 0 END) AS banned
+       FROM users`
+    )
+    .get();
+  const garments = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(CASE WHEN owner_bound_at IS NOT NULL THEN 1 ELSE 0 END) AS bound,
+         SUM(CASE WHEN lr.id IS NOT NULL THEN 1 ELSE 0 END) AS lost
+       FROM garments g
+       LEFT JOIN lost_reports lr
+         ON lr.garment_id = g.id
+        AND lr.status = 'active'
+        AND datetime(lr.expires_at) > datetime('now')`
+    )
+    .get();
+  const reports = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN status = 'active' AND datetime(expires_at) > datetime('now') THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN status = 'found' THEN 1 ELSE 0 END) AS found,
+         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+       FROM lost_reports`
+    )
+    .get();
+  const todayPrefix = new Date().toISOString().slice(0, 10);
+  const today = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM contact_reveal_logs WHERE created_at LIKE ?) AS views,
+         (SELECT COUNT(*) FROM binding_logs WHERE created_at LIKE ? AND action IN ('bind', 'modify')) AS bindings`
+    )
+    .get(`${todayPrefix}%`, `${todayPrefix}%`);
+
+  return {
+    users: {
+      total: Number(users.total || 0),
+      active: Number(users.active || 0),
+      banned: Number(users.banned || 0)
+    },
+    garments: {
+      total: Number(garments.total || 0),
+      bound: Number(garments.bound || 0),
+      lost: Number(garments.lost || 0)
+    },
+    reports: {
+      active: Number(reports.active || 0),
+      found: Number(reports.found || 0),
+      cancelled: Number(reports.cancelled || 0)
+    },
+    today: {
+      views: Number(today.views || 0),
+      bindings: Number(today.bindings || 0)
+    }
+  };
+}
+
+export function exportRows(db, type) {
+  const queries = {
+    users: `SELECT id, openid, nickname, status, binding_count, lost_report_count, created_at, last_login_at FROM users ORDER BY id`,
+    garments: `SELECT id, sn, status, bound_by_user_id, owner_bound_at, query_count, created_at, updated_at FROM garments ORDER BY id`,
+    reports: `SELECT id, garment_sn, reporter_id, status, note, view_count, contact_reveal_count, expires_at, created_at, updated_at FROM lost_reports ORDER BY id`,
+    'binding-logs': `SELECT id, garment_sn, user_id, actor_type, action, changed_fields, created_at FROM binding_logs ORDER BY id`
+  };
+  const sql = queries[type];
+
+  if (!sql) {
+    return null;
+  }
+
+  return db.prepare(sql).all();
 }
 
 export function findGarmentDetailBySn(db, sn) {
@@ -771,8 +1423,19 @@ export function findGarmentDetailBySn(db, sn) {
          g.owner_name,
          g.owner_phone_tail,
          g.owner_bound_at,
+         g.bound_by_user_id,
+         g.lost_report_id AS garment_lost_report_id,
          g.created_at,
          g.updated_at,
+         lr.id AS lost_report_id,
+         lr.reporter_id AS lost_reporter_id,
+         lr.note AS lost_report_note,
+         lr.status AS lost_report_status,
+         lr.view_count AS lost_report_view_count,
+         lr.contact_reveal_count AS lost_report_contact_reveal_count,
+         lr.expires_at AS lost_report_expires_at,
+         lr.created_at AS lost_report_created_at,
+         lr.updated_at AS lost_report_updated_at,
          c.id AS clothing_id,
          c.product_name AS clothing_product_name,
          c.fabric AS clothing_fabric,
@@ -809,6 +1472,10 @@ export function findGarmentDetailBySn(db, sn) {
        FROM garments g
        LEFT JOIN clothes c ON c.id = g.clothing_id
        LEFT JOIN garment_batches b ON b.id = g.batch_id
+       LEFT JOIN lost_reports lr
+         ON lr.garment_id = g.id
+        AND lr.status = 'active'
+        AND datetime(lr.expires_at) > datetime('now')
        WHERE g.sn = ?`
     )
     .get(sn);
@@ -960,6 +1627,47 @@ export function toBatchDto(row, garments = []) {
   };
 }
 
+export function toBindingLogDto(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    garmentId: row.garment_id,
+    garmentSn: row.garment_sn,
+    userId: row.user_id,
+    actorType: row.actor_type,
+    action: row.action,
+    beforeData: row.before_data ? JSON.parse(row.before_data) : null,
+    afterData: row.after_data ? JSON.parse(row.after_data) : null,
+    changedFields: row.changed_fields ? JSON.parse(row.changed_fields) : [],
+    createdAt: row.created_at
+  };
+}
+
+export function toLostReportDto(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    garmentId: row.garment_id,
+    garmentSn: row.garment_sn,
+    reporterId: row.reporter_id,
+    note: row.note,
+    status: row.status,
+    viewCount: Number(row.view_count || 0),
+    contactRevealCount: Number(row.contact_reveal_count || 0),
+    expiresAt: row.expires_at,
+    closedAt: row.closed_at,
+    closeReason: row.close_reason,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 export function toGarmentDto(row, options = {}) {
   if (!row) {
     return null;
@@ -975,6 +1683,11 @@ export function toGarmentDto(row, options = {}) {
     row.owner_phone_tail || String(contactPhone || '').replace(/\D/g, '').slice(-4) || null;
   const boundAt = row.owner_bound_at || null;
   const isBound = Boolean(boundAt || studentName);
+  const isOwner = Boolean(
+    options.viewerUserId && row.bound_by_user_id && Number(options.viewerUserId) === Number(row.bound_by_user_id)
+  );
+  const hasActiveLostReport = Boolean(row.lost_report_id);
+  const showContact = Boolean(options.showContact || hasActiveLostReport || options.privateBinding || isOwner);
   const owner = isBound
     ? {
         name: maskOwnerName(studentName),
@@ -984,8 +1697,14 @@ export function toGarmentDto(row, options = {}) {
         boundAt
       }
     : null;
+
+  if (owner && showContact) {
+    owner.contactName = contactName;
+    owner.contactPhone = contactPhone;
+  }
+
   const binding =
-    options.privateBinding && isBound
+    (options.privateBinding || isOwner) && isBound
       ? {
           studentName,
           school,
@@ -996,6 +1715,19 @@ export function toGarmentDto(row, options = {}) {
           boundAt
         }
       : null;
+  const lostReport = hasActiveLostReport
+    ? {
+        id: row.lost_report_id,
+        reporterId: row.lost_reporter_id,
+        note: row.lost_report_note,
+        status: row.lost_report_status,
+        viewCount: Number(row.lost_report_view_count || 0),
+        contactRevealCount: Number(row.lost_report_contact_reveal_count || 0),
+        expiresAt: row.lost_report_expires_at,
+        createdAt: row.lost_report_created_at,
+        updatedAt: row.lost_report_updated_at
+      }
+    : null;
 
   const dto = {
     id: row.id,
@@ -1029,7 +1761,10 @@ export function toGarmentDto(row, options = {}) {
     batchRemark: row.batch_remark,
     queryCount: Number(row.query_count || 0),
     isBound,
+    isOwner,
+    boundByUserId: options.privateBinding ? row.bound_by_user_id || null : undefined,
     owner,
+    lostReport,
     status,
     snStatus: row.sn_status || row.status,
     clothingStatus: row.clothing_status,

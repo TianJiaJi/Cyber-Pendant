@@ -36,9 +36,8 @@ function goHome() {
 }
 
 function openUser() {
-  uni.showToast({
-    title: '用户中心开发中',
-    icon: 'none'
+  uni.navigateTo({
+    url: '/pages/user/index'
   });
 }
 </script>

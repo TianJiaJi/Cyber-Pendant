@@ -66,6 +66,8 @@ export function createConfig(overrides = {}) {
   const env = process.env;
   const tokenSecret =
     overrides.tokenSecret || env.TOKEN_SECRET || randomBytes(32).toString('hex');
+  const userTokenSecret =
+    overrides.userTokenSecret || env.USER_TOKEN_SECRET || tokenSecret;
 
   return {
     port: Number(overrides.port || env.PORT || 8787),
@@ -86,6 +88,12 @@ export function createConfig(overrides = {}) {
     corsOrigin: overrides.corsOrigin || env.CORS_ORIGIN || '*',
     tokenSecret,
     usingEphemeralTokenSecret: !overrides.tokenSecret && !env.TOKEN_SECRET,
+    userTokenSecret,
+    userTokenTtlDays: Number(overrides.userTokenTtlDays || env.USER_TOKEN_TTL_DAYS || 30),
+    usingSharedUserTokenSecret: userTokenSecret === tokenSecret,
+    wechatAppId: overrides.wechatAppId || env.WECHAT_APP_ID || '',
+    wechatAppSecret: overrides.wechatAppSecret || env.WECHAT_APP_SECRET || '',
+    wechatCode2Session: overrides.wechatCode2Session || null,
     adminUsername: overrides.adminUsername || env.ADMIN_USERNAME || 'admin',
     adminPassword: overrides.adminPassword || env.ADMIN_PASSWORD || ''
   };

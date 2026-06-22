@@ -13,6 +13,20 @@
         "navigationBarTitleText": "吊牌详情",
         "navigationStyle": "custom"
       }
+    },
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "微信登录",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/user/index",
+      "style": {
+        "navigationBarTitleText": "用户中心",
+        "navigationStyle": "custom"
+      }
     }
   ],
   "globalStyle": {

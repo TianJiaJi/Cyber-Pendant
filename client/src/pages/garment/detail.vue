@@ -24,31 +24,32 @@
       </view>
 
       <view v-else-if="currentGarment" class="detail-content">
-        <view :class="['verification-hero', isInactive ? 'inactive' : '']">
+        <view :class="['verification-hero', isInactive ? 'inactive' : '', isLost ? 'lost' : '']">
           <view class="hero-copy">
-            <text class="hero-title">{{ isInactive ? '吊牌已停用' : '已通过质量检测' }}</text>
+            <text class="hero-title">{{ heroTitle }}</text>
             <text class="hero-subtitle">
-              {{ isInactive ? '当前不可作为有效溯源凭证' : '校服溯源 · 安心穿着' }}
+              {{ heroSubtitle }}
             </text>
           </view>
-          <view :class="['verified-seal', isInactive ? 'inactive' : '']">
-            <text class="seal-main">{{ isInactive ? '停用' : '检验通过' }}</text>
-            <text class="seal-sub">{{ isInactive ? 'INACTIVE' : 'VERIFIED' }}</text>
+          <view :class="['verified-seal', isInactive ? 'inactive' : '', isLost ? 'lost' : '']">
+            <text class="seal-main">{{ sealMain }}</text>
+            <text class="seal-sub">{{ sealSub }}</text>
           </view>
         </view>
 
-        <view :class="['assurance-card', isInactive ? 'inactive' : '']">
+        <view :class="['assurance-card', isInactive ? 'inactive' : '', isLost ? 'lost' : '']">
           <view class="assurance-title">
-            <text>{{ isInactive ? '该吊牌当前已停用' : '您查询的校服为正品' }}</text>
-            <text v-if="!isInactive">，当前查询次数 </text>
-            <text v-if="!isInactive" class="query-count">{{ queryCountText }}</text>
-            <text v-if="!isInactive"> 次</text>
+            <text>{{ assuranceTitle }}</text>
+            <text v-if="!isInactive && !isLost">，当前查询次数 </text>
+            <text v-if="!isInactive && !isLost" class="query-count">{{ queryCountText }}</text>
+            <text v-if="!isInactive && !isLost"> 次</text>
           </view>
           <view class="assurance-copy">
             <text v-if="isInactive">
               {{ errorMessage || '如需确认状态，请联系生产企业。' }}
             </text>
             <text v-if="isInactive">累计查询次数 {{ queryCountText }} 次</text>
+            <text v-else-if="isLost">{{ lostDescription }}，请登录后查看脱敏绑定信息或披露联系方式。</text>
             <text v-else>信息来自 Cyber-Pendant 溯源系统</text>
           </view>
         </view>
@@ -119,7 +120,7 @@
             hover-class="bind-button-hover"
             @click="() => handleBind()"
           >
-            {{ isBound ? '已绑定' : isInactive ? '不可绑定' : '立即绑定' }}
+            {{ bindingActionText }}
           </button>
         </view>
 
@@ -127,7 +128,7 @@
           <view class="lost-copy">
             <text class="lost-title">{{ lostReport ? '该校服已报失' : '防丢管理' }}</text>
             <text class="lost-text">
-              {{ lostReport ? lostDescription : '校服遗失后，拾获者可在详情页查看完整联系方式。' }}
+              {{ lostReport ? lostCardDescription : '只有报失后才会披露完整联系方式；未报失时后端只返回脱敏绑定信息。' }}
             </text>
             <text v-if="revealedContact" class="lost-contact">
               {{ revealedContact.contactName || '联系人' }} · {{ revealedContact.contactPhone }}
@@ -304,9 +305,70 @@ const queryCountText = computed(() => {
 });
 
 const ownerInfo = computed(() => currentGarment.value?.owner || null);
-const isBound = computed(() => Boolean(ownerInfo.value));
+const isBound = computed(() => Boolean(currentGarment.value?.isBound));
 const isOwner = computed(() => Boolean(currentGarment.value?.isOwner));
 const lostReport = computed(() => currentGarment.value?.lostReport || null);
+const isLost = computed(() => Boolean(lostReport.value));
+
+const heroTitle = computed(() => {
+  if (isInactive.value) {
+    return '吊牌已停用';
+  }
+
+  if (isLost.value) {
+    return '该校服已报失';
+  }
+
+  return '已通过质量检测';
+});
+
+const heroSubtitle = computed(() => {
+  if (isInactive.value) {
+    return '当前不可作为有效溯源凭证';
+  }
+
+  if (isLost.value) {
+    return '请协助归还 · 联系方式需登录查看';
+  }
+
+  return '校服溯源 · 安心穿着';
+});
+
+const sealMain = computed(() => {
+  if (isInactive.value) {
+    return '停用';
+  }
+
+  if (isLost.value) {
+    return '报失';
+  }
+
+  return '检验通过';
+});
+
+const sealSub = computed(() => {
+  if (isInactive.value) {
+    return 'INACTIVE';
+  }
+
+  if (isLost.value) {
+    return 'LOST';
+  }
+
+  return 'VERIFIED';
+});
+
+const assuranceTitle = computed(() => {
+  if (isInactive.value) {
+    return '该吊牌当前已停用';
+  }
+
+  if (isLost.value) {
+    return '该校服当前处于报失状态';
+  }
+
+  return '您查询的校服为正品';
+});
 
 const lostDescription = computed(() => {
   if (!lostReport.value) {
@@ -317,8 +379,20 @@ const lostDescription = computed(() => {
   return expiresAt ? `有效期至 ${expiresAt}` : '当前为有效报失状态';
 });
 
+const lostCardDescription = computed(() => {
+  if (!lostReport.value) {
+    return '';
+  }
+
+  return `${lostDescription.value}；登录后点击查看联系方式才会披露绑定时录入的联系人和联系电话。`;
+});
+
 const bindingTitle = computed(() => {
   if (isBound.value) {
+    if (!ownerInfo.value) {
+      return '该校服已绑定学生';
+    }
+
     return '该校服已绑定学生';
   }
 
@@ -331,6 +405,12 @@ const bindingTitle = computed(() => {
 
 const bindingDescription = computed(() => {
   if (isBound.value) {
+    if (!ownerInfo.value) {
+      return isLoggedIn()
+        ? '暂无可显示的绑定信息'
+        : '请先登录小程序，再查看脱敏后的绑定信息';
+    }
+
     const pieces = [
       ownerInfo.value?.name || '已绑定',
       ownerInfo.value?.school,
@@ -347,6 +427,22 @@ const bindingDescription = computed(() => {
   }
 
   return '录入学生信息后，后台可查看并支持解绑';
+});
+
+const bindingActionText = computed(() => {
+  if (isBound.value && !ownerInfo.value && !isLoggedIn()) {
+    return '登录查看';
+  }
+
+  if (isBound.value) {
+    return '已绑定';
+  }
+
+  if (isInactive.value) {
+    return '不可绑定';
+  }
+
+  return '立即绑定';
 });
 
 const tagFields = computed(() => {
@@ -431,6 +527,11 @@ function toggleCompany() {
 
 function handleBind() {
   if (isBound.value) {
+    if (!ownerInfo.value && !isLoggedIn()) {
+      ensureLoggedIn();
+      return;
+    }
+
     uni.showToast({
       title: '该校服已绑定',
       icon: 'none'
@@ -562,6 +663,11 @@ async function reportLost() {
     return;
   }
 
+  const confirmed = await confirmReportLostDisclosure();
+  if (!confirmed) {
+    return;
+  }
+
   try {
     const response = await reportLostGarment(currentGarment.value.sn, {});
     garment.value = response.garment;
@@ -575,6 +681,23 @@ async function reportLost() {
       icon: 'none'
     });
   }
+}
+
+function confirmReportLostDisclosure() {
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '确认报失',
+      content: '启动报失后，拾获者登录并点击查看联系方式时，将披露绑定时录入的联系人和联系电话。未报失时后端只返回脱敏信息。',
+      confirmText: '确认报失',
+      cancelText: '再想想',
+      success(result) {
+        resolve(Boolean(result.confirm));
+      },
+      fail() {
+        resolve(false);
+      }
+    });
+  });
 }
 
 async function cancelLost() {
@@ -599,6 +722,10 @@ async function cancelLost() {
 }
 
 async function revealContact() {
+  if (!ensureLoggedIn()) {
+    return;
+  }
+
   try {
     const response = await revealGarmentContact(currentGarment.value.sn, {
       source: 'detail'
@@ -829,6 +956,11 @@ async function revealContact() {
   background: rgba(255, 249, 246, 0.56);
 }
 
+.verification-hero.lost {
+  border-bottom-color: rgba(168, 78, 58, 0.34);
+  background: linear-gradient(180deg, rgba(255, 243, 236, 0.92), rgba(255, 249, 246, 0.62));
+}
+
 .hero-copy {
   min-width: 0;
   flex: 1;
@@ -876,6 +1008,12 @@ async function revealContact() {
   background: rgba(255, 248, 244, 0.72);
 }
 
+.verified-seal.lost {
+  border-color: #a44f3a;
+  color: #9a4b38;
+  background: rgba(255, 240, 232, 0.9);
+}
+
 .seal-main {
   font-size: 22rpx;
   font-weight: 760;
@@ -899,6 +1037,11 @@ async function revealContact() {
 .assurance-card.inactive {
   border-color: #e4c8be;
   background: rgba(255, 249, 246, 0.9);
+}
+
+.assurance-card.lost {
+  border-color: rgba(164, 79, 58, 0.42);
+  background: #fff6f1;
 }
 
 .assurance-title,
@@ -1210,9 +1353,9 @@ async function revealContact() {
 .lost-card {
   margin: 22rpx 36rpx 0;
   padding: 28rpx;
-  border: 1px solid #ded5c9;
+  border: 1px solid rgba(164, 79, 58, 0.34);
   border-radius: 16rpx;
-  background: rgba(255, 252, 246, 0.92);
+  background: #fffaf6;
 }
 
 .lost-copy {
@@ -1248,13 +1391,14 @@ async function revealContact() {
 }
 
 .lost-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
   gap: 14rpx;
   margin-top: 22rpx;
 }
 
 .lost-button {
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   justify-content: center;

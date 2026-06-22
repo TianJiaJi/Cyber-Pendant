@@ -1704,8 +1704,11 @@ export function toGarmentDto(row, options = {}) {
     options.viewerUserId && row.bound_by_user_id && Number(options.viewerUserId) === Number(row.bound_by_user_id)
   );
   const hasActiveLostReport = Boolean(row.lost_report_id);
-  const showContact = Boolean(options.showContact || hasActiveLostReport || options.privateBinding || isOwner);
-  const owner = isBound
+  const showOwnerSummary = Boolean(
+    options.showOwnerSummary || options.privateBinding || options.showContact
+  );
+  const showContact = Boolean(options.showContact || options.privateBinding);
+  const owner = isBound && showOwnerSummary
     ? {
         name: maskOwnerName(studentName),
         school,
@@ -1721,7 +1724,7 @@ export function toGarmentDto(row, options = {}) {
   }
 
   const binding =
-    (options.privateBinding || isOwner) && isBound
+    options.privateBinding && isBound
       ? {
           studentName,
           school,

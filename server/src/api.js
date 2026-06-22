@@ -541,7 +541,10 @@ function handlePublicGarment(req, res, context, sn, searchParams) {
     row = incrementGarmentQueryCount(context.db, sn);
   }
 
-  const garment = toGarmentDto(row, { viewerUserId });
+  const garment = toGarmentDto(row, {
+    viewerUserId,
+    showOwnerSummary: Boolean(viewerUserId)
+  });
   if (garment.status !== 'active') {
     sendJson(req, res, context.config, 423, {
       message: '该吊牌已停用',
@@ -651,7 +654,10 @@ function handleUnbindGarment(req, res, context, sn) {
 function handleUserGarments(req, res, context) {
   const userPayload = requireUser(req, context.config);
   const garments = listUserGarments(context.db, userPayload.sub).map((row) =>
-    toGarmentDto(row, { viewerUserId: userPayload.sub })
+    toGarmentDto(row, {
+      viewerUserId: userPayload.sub,
+      showOwnerSummary: true
+    })
   );
 
   sendJson(req, res, context.config, 200, { garments });
@@ -689,7 +695,10 @@ async function handleCreateLostReport(req, res, context, sn) {
 
   sendJson(req, res, context.config, 201, {
     report: toLostReportDto(report),
-    garment: toGarmentDto(garment, { viewerUserId: userPayload.sub })
+    garment: toGarmentDto(garment, {
+      viewerUserId: userPayload.sub,
+      showOwnerSummary: true
+    })
   });
 }
 
@@ -722,14 +731,7 @@ function handleCloseLostReport(req, res, context, sn) {
 }
 
 async function handleContactReveal(req, res, context, sn) {
-  let userPayload = null;
-  try {
-    userPayload = requireUser(req, context.config);
-  } catch (error) {
-    if (error.status !== 401) {
-      throw error;
-    }
-  }
+  const userPayload = requireUser(req, context.config);
 
   const row = findGarmentDetailBySn(context.db, sn);
   if (!row) {
@@ -747,7 +749,10 @@ async function handleContactReveal(req, res, context, sn) {
     source: body.source,
     ...requestMeta(req)
   });
-  const garment = toGarmentDto(updated, { showContact: true });
+  const garment = toGarmentDto(updated, {
+    viewerUserId: userPayload.sub,
+    showContact: true
+  });
 
   sendJson(req, res, context.config, 200, {
     contact: {

@@ -22,7 +22,7 @@
 </template>
 
 <script setup>
-defineProps({
+const props = defineProps({
   active: {
     type: String,
     default: 'home'
@@ -30,14 +30,33 @@ defineProps({
 });
 
 function goHome() {
-  uni.reLaunch({
-    url: '/pages/index/index'
-  });
+  if (currentRoute() === 'pages/index/index') {
+    return;
+  }
+
+  replacePage('/pages/index/index');
 }
 
 function openUser() {
-  uni.navigateTo({
-    url: '/pages/user/index'
+  if (currentRoute() === 'pages/user/index') {
+    return;
+  }
+
+  replacePage('/pages/user/index');
+}
+
+function currentRoute() {
+  const pages = getCurrentPages();
+  const current = pages[pages.length - 1];
+  return current?.route || '';
+}
+
+function replacePage(url) {
+  uni.redirectTo({
+    url,
+    fail() {
+      uni.reLaunch({ url });
+    }
   });
 }
 </script>

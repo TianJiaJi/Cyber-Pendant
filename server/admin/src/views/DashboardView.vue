@@ -20,6 +20,72 @@
         </div>
       </div>
 
+      <div class="management-grid">
+        <div class="records-panel">
+          <div class="records-heading compact-heading">
+            <div>
+              <span class="section-title">用户管理</span>
+              <span class="toolbar-meta">{{ users.length }} 个微信用户</span>
+            </div>
+            <button class="secondary-button small-button" @click="loadAdminOverview">
+              刷新
+            </button>
+          </div>
+
+          <span v-if="overviewMessage" class="message-text panel-message">
+            {{ overviewMessage }}
+          </span>
+
+          <div v-if="overviewLoading" class="empty-state">正在加载用户数据...</div>
+          <div v-else-if="users.length === 0" class="empty-state">暂无用户登录记录</div>
+          <div v-else class="admin-user-list">
+            <div v-for="user in users" :key="user.id" class="admin-user-row">
+              <div>
+                <span class="admin-user-name">{{ user.nickname || '微信用户' }}</span>
+                <span class="admin-user-meta">{{ user.openid }}</span>
+                <span class="admin-user-meta">
+                  绑定 {{ user.bindingCount || 0 }} · 报失 {{ user.lostReportCount || 0 }}
+                </span>
+              </div>
+              <div class="user-row-actions">
+                <span :class="['status-pill', user.status === 'banned' ? 'inactive' : '']">
+                  {{ user.status === 'banned' ? '封禁' : '正常' }}
+                </span>
+                <button
+                  class="secondary-button small-button"
+                  @click="toggleUserStatus(user)"
+                >
+                  {{ user.status === 'banned' ? '解封' : '封禁' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="records-panel">
+          <div class="records-heading compact-heading">
+            <div>
+              <span class="section-title">数据导出</span>
+              <span class="toolbar-meta">CSV 格式，使用当前后台登录权限</span>
+            </div>
+          </div>
+
+          <div class="export-grid">
+            <button
+              v-for="item in exportTypes"
+              :key="item.type"
+              class="secondary-button small-button"
+              @click="exportCsv(item.type)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <span v-if="exportMessage" class="message-text panel-message">
+            {{ exportMessage }}
+          </span>
+        </div>
+      </div>
+
       <div class="records-panel">
         <div class="records-heading">
           <div>
@@ -198,10 +264,15 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
+  banAdminUser,
   clearToken,
   createClothing,
+  downloadAdminExport,
   FRONTEND_BASE_URL,
-  listClothes
+  getAdminStats,
+  listAdminUsers,
+  listClothes,
+  unbanAdminUser
 } from '../utils/api.js';
 
 const emptyClothingForm = {
@@ -232,30 +303,40 @@ const standardPlaceholder = [
 
 const clothingForm = reactive({ ...emptyClothingForm });
 const clothes = ref([]);
+const users = ref([]);
+const stats = ref(null);
 const query = ref('');
 const loading = ref(false);
+const overviewLoading = ref(false);
 const saving = ref(false);
 const showCreatePanel = ref(false);
 const formMessage = ref('');
 const listMessage = ref('');
+const overviewMessage = ref('');
+const exportMessage = ref('');
 const lastCreatedClothing = ref(null);
 const router = useRouter();
+const exportTypes = [
+  { type: 'users', label: '导出用户' },
+  { type: 'garments', label: '导出校服' },
+  { type: 'reports', label: '导出报失' },
+  { type: 'binding-logs', label: '导出绑定日志' }
+];
 
 const summaryCards = computed(() => {
-  const activeCount = clothes.value.filter((item) => item.status !== 'inactive').length;
-  const batchCount = clothes.value.reduce((total, item) => total + Number(item.batchCount || 0), 0);
   const garmentCount = clothes.value.reduce((total, item) => total + Number(item.garmentCount || 0), 0);
 
   return [
-    { label: '衣服主档', value: clothes.value.length },
-    { label: '有效主档', value: activeCount },
-    { label: '批次总数', value: batchCount },
-    { label: 'SN 总数', value: garmentCount }
+    { label: '用户总数', value: stats.value?.users?.total ?? users.value.length },
+    { label: '有效用户', value: stats.value?.users?.active ?? 0 },
+    { label: 'SN 总数', value: stats.value?.garments?.total ?? garmentCount },
+    { label: '有效报失', value: stats.value?.reports?.active ?? 0 }
   ];
 });
 
 onMounted(() => {
   loadClothes();
+  loadAdminOverview();
 });
 
 function resetForm() {
@@ -308,6 +389,52 @@ async function loadClothes() {
     listMessage.value = error.message || '加载衣服失败。';
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadAdminOverview() {
+  overviewLoading.value = true;
+  overviewMessage.value = '';
+
+  try {
+    const [statsPayload, usersPayload] = await Promise.all([
+      getAdminStats(),
+      listAdminUsers()
+    ]);
+    stats.value = statsPayload;
+    users.value = usersPayload.users || [];
+  } catch (error) {
+    handleAuthError(error);
+    overviewMessage.value = error.message || '加载用户和统计失败。';
+  } finally {
+    overviewLoading.value = false;
+  }
+}
+
+async function toggleUserStatus(user) {
+  overviewMessage.value = '';
+
+  try {
+    if (user.status === 'banned') {
+      await unbanAdminUser(user.id);
+    } else {
+      await banAdminUser(user.id);
+    }
+    await loadAdminOverview();
+  } catch (error) {
+    handleAuthError(error);
+    overviewMessage.value = error.message || '更新用户状态失败。';
+  }
+}
+
+async function exportCsv(type) {
+  exportMessage.value = '';
+
+  try {
+    await downloadAdminExport(type);
+  } catch (error) {
+    handleAuthError(error);
+    exportMessage.value = error.message || '导出失败。';
   }
 }
 
@@ -453,11 +580,65 @@ function goHome() {
   padding: 11px;
 }
 
+.management-grid {
+  display: grid;
+  gap: 12px;
+}
+
 .records-heading {
   display: flex;
   flex-direction: column;
   gap: 9px;
   margin-bottom: 10px;
+}
+
+.compact-heading {
+  margin-bottom: 8px;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-user-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e3dcd2;
+  border-radius: 4px;
+  background: #fbf8f2;
+}
+
+.admin-user-name,
+.admin-user-meta {
+  display: block;
+}
+
+.admin-user-name {
+  color: #141414;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.admin-user-meta {
+  margin-top: 4px;
+  color: #6b665f;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.user-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .toolbar-meta {
@@ -737,6 +918,10 @@ function goHome() {
     gap: 14px;
   }
 
+  .management-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  }
+
   .summary-card,
   .records-panel,
   .create-panel,
@@ -771,6 +956,20 @@ function goHome() {
   .records-heading,
   .create-panel-head {
     display: flex;
+  }
+
+  .admin-user-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 12px;
+  }
+
+  .admin-user-name {
+    font-size: 15px;
+  }
+
+  .admin-user-meta {
+    font-size: 12px;
   }
 
   .search-row {

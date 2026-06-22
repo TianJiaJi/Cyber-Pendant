@@ -83,12 +83,15 @@
           </view>
         </view>
       </view>
+
+      <AppFooter active="home" />
     </view>
   </view>
 </template>
 
 <script setup>
 import { nextTick, onBeforeUnmount, ref } from 'vue';
+import AppFooter from '../../components/AppFooter.vue';
 import { getPublicGarment } from '../../utils/api.js';
 import { extractSnFromScan, scanWithPlatform } from '../../utils/scanner.js';
 
@@ -298,9 +301,13 @@ onBeforeUnmount(() => {
 }
 
 .phone-shell {
+  height: 100vh;
   min-height: 100vh;
   max-width: 480px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(248, 244, 237, 0.98) 23%, #f7f3ec 100%);
   color: #151515;
@@ -318,6 +325,10 @@ onBeforeUnmount(() => {
 /* #endif */
 
 .home-topbar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -326,6 +337,7 @@ onBeforeUnmount(() => {
   padding: 0 34rpx;
   border-bottom: 1px solid rgba(210, 202, 190, 0.78);
   background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18rpx);
 }
 
 .brand-block {
@@ -365,6 +377,10 @@ onBeforeUnmount(() => {
 }
 
 .home-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 38rpx 34rpx 56rpx;
 }
 

@@ -123,6 +123,44 @@
           </button>
         </view>
 
+        <view v-if="lostReport || isOwner" class="lost-card">
+          <view class="lost-copy">
+            <text class="lost-title">{{ lostReport ? '该校服已报失' : '防丢管理' }}</text>
+            <text class="lost-text">
+              {{ lostReport ? lostDescription : '校服遗失后，拾获者可在详情页查看完整联系方式。' }}
+            </text>
+            <text v-if="revealedContact" class="lost-contact">
+              {{ revealedContact.contactName || '联系人' }} · {{ revealedContact.contactPhone }}
+            </text>
+          </view>
+          <view class="lost-actions">
+            <button
+              v-if="isOwner && !lostReport"
+              class="lost-button"
+              hover-class="lost-button-hover"
+              @click="() => reportLost()"
+            >
+              报告丢失
+            </button>
+            <button
+              v-if="isOwner && lostReport"
+              class="lost-button"
+              hover-class="lost-button-hover"
+              @click="() => cancelLost()"
+            >
+              取消报失
+            </button>
+            <button
+              v-if="lostReport"
+              class="lost-button secondary"
+              hover-class="lost-button-hover"
+              @click="() => revealContact()"
+            >
+              查看联系方式
+            </button>
+          </view>
+        </view>
+
         <view class="support-footer">
           <view class="footer-line"></view>
           <text class="support-text">Cyber-Pendant 提供技术支持</text>
@@ -140,6 +178,8 @@
           </button>
         </view>
       </view>
+
+      <AppFooter active="home" />
 
       <view v-if="bindingPanelVisible" class="bind-overlay">
         <view class="bind-panel" @click.stop>
@@ -218,7 +258,16 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
-import { bindPublicGarment, getPublicGarment, qrcodeUrl } from '../../utils/api.js';
+import AppFooter from '../../components/AppFooter.vue';
+import {
+  bindPublicGarment,
+  cancelLostReport,
+  getPublicGarment,
+  isLoggedIn,
+  qrcodeUrl,
+  reportLostGarment,
+  revealGarmentContact
+} from '../../utils/api.js';
 
 const loading = ref(true);
 const garment = ref(null);
@@ -228,6 +277,7 @@ const companyExpanded = ref(false);
 const bindingPanelVisible = ref(false);
 const bindingSubmitting = ref(false);
 const bindingMessage = ref('');
+const revealedContact = ref(null);
 const bindingForm = ref({
   studentName: '',
   studentSchool: '',
@@ -255,6 +305,17 @@ const queryCountText = computed(() => {
 
 const ownerInfo = computed(() => currentGarment.value?.owner || null);
 const isBound = computed(() => Boolean(ownerInfo.value));
+const isOwner = computed(() => Boolean(currentGarment.value?.isOwner));
+const lostReport = computed(() => currentGarment.value?.lostReport || null);
+
+const lostDescription = computed(() => {
+  if (!lostReport.value) {
+    return '';
+  }
+
+  const expiresAt = String(lostReport.value.expiresAt || '').slice(0, 10);
+  return expiresAt ? `有效期至 ${expiresAt}` : '当前为有效报失状态';
+});
 
 const bindingTitle = computed(() => {
   if (isBound.value) {
@@ -385,8 +446,27 @@ function handleBind() {
     return;
   }
 
+  if (!ensureLoggedIn()) {
+    return;
+  }
+
   bindingMessage.value = '';
   bindingPanelVisible.value = true;
+}
+
+function ensureLoggedIn() {
+  if (isLoggedIn()) {
+    return true;
+  }
+
+  const current = currentGarment.value;
+  const redirect = current?.sn
+    ? `/pages/garment/detail?sn=${encodeURIComponent(current.sn)}`
+    : '/pages/user/index';
+  uni.navigateTo({
+    url: `/pages/login/index?redirect=${encodeURIComponent(redirect)}`
+  });
+  return false;
 }
 
 function closeBindingPanel() {
@@ -466,6 +546,75 @@ async function submitBinding() {
   }
 }
 
+async function refreshCurrentGarment(track = false) {
+  const current = currentGarment.value;
+  if (!current?.sn) {
+    return;
+  }
+
+  const response = await getPublicGarment(current.sn, { track });
+  garment.value = response.garment;
+  inactiveGarment.value = null;
+}
+
+async function reportLost() {
+  if (!ensureLoggedIn()) {
+    return;
+  }
+
+  try {
+    const response = await reportLostGarment(currentGarment.value.sn, {});
+    garment.value = response.garment;
+    uni.showToast({
+      title: '已报失',
+      icon: 'success'
+    });
+  } catch (error) {
+    uni.showToast({
+      title: error.message || '报失失败',
+      icon: 'none'
+    });
+  }
+}
+
+async function cancelLost() {
+  if (!ensureLoggedIn()) {
+    return;
+  }
+
+  try {
+    await cancelLostReport(currentGarment.value.sn);
+    await refreshCurrentGarment(false);
+    revealedContact.value = null;
+    uni.showToast({
+      title: '已取消',
+      icon: 'success'
+    });
+  } catch (error) {
+    uni.showToast({
+      title: error.message || '取消失败',
+      icon: 'none'
+    });
+  }
+}
+
+async function revealContact() {
+  try {
+    const response = await revealGarmentContact(currentGarment.value.sn, {
+      source: 'detail'
+    });
+    revealedContact.value = response.contact;
+    if (response.garment) {
+      garment.value = response.garment;
+    }
+  } catch (error) {
+    uni.showToast({
+      title: error.message || '查看失败',
+      icon: 'none'
+    });
+  }
+}
+
 </script>
 
 <style scoped>
@@ -475,9 +624,13 @@ async function submitBinding() {
 }
 
 .phone-shell {
+  height: 100vh;
   min-height: 100vh;
   max-width: 480px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 244, 237, 0.96) 18%, #f7f3ec 100%);
   color: #151515;
@@ -495,6 +648,10 @@ async function submitBinding() {
 /* #endif */
 
 .detail-topbar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: grid;
   grid-template-columns: 128rpx minmax(0, 1fr) 128rpx;
   align-items: center;
@@ -502,12 +659,14 @@ async function submitBinding() {
   padding: 0 34rpx;
   border-bottom: 1px solid rgba(210, 202, 190, 0.78);
   background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18rpx);
 }
 
 .nav-button,
 .state-action,
 .company-card,
 .bind-button,
+.lost-button,
 .bind-close,
 .bind-submit {
   margin: 0;
@@ -522,6 +681,7 @@ async function submitBinding() {
 .state-action::after,
 .company-card::after,
 .bind-button::after,
+.lost-button::after,
 .bind-close::after,
 .bind-submit::after {
   border: 0;
@@ -584,6 +744,10 @@ async function submitBinding() {
 }
 
 .state-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 42rpx 36rpx;
 }
 
@@ -645,6 +809,10 @@ async function submitBinding() {
 }
 
 .detail-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 54rpx;
 }
 
@@ -1039,6 +1207,78 @@ async function submitBinding() {
   color: #746d62;
 }
 
+.lost-card {
+  margin: 22rpx 36rpx 0;
+  padding: 28rpx;
+  border: 1px solid #ded5c9;
+  border-radius: 16rpx;
+  background: rgba(255, 252, 246, 0.92);
+}
+
+.lost-copy {
+  min-width: 0;
+}
+
+.lost-title,
+.lost-text,
+.lost-contact {
+  display: block;
+}
+
+.lost-title {
+  color: #151515;
+  font-size: 30rpx;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.lost-text {
+  margin-top: 10rpx;
+  color: #777168;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.lost-contact {
+  margin-top: 14rpx;
+  color: #9a4b38;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.lost-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+  margin-top: 22rpx;
+}
+
+.lost-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 76rpx;
+  padding: 0 18rpx;
+  border-radius: 8rpx;
+  background: #9a4b38;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 680;
+}
+
+.lost-button.secondary {
+  background: #171717;
+}
+
+.lost-button-hover {
+  background: #6f3528;
+}
+
+.lost-button.secondary.lost-button-hover {
+  background: #2b2b2b;
+}
+
 .support-footer {
   display: flex;
   align-items: center;
@@ -1184,10 +1424,14 @@ async function submitBinding() {
 
 @media (min-width: 720px) {
   .detail-page {
+    height: 100vh;
+    overflow: hidden;
     padding: 24px 0;
   }
 
   .phone-shell {
+    height: calc(100vh - 48px);
+    min-height: 0;
     border-radius: 18px;
     overflow: hidden;
     box-shadow:

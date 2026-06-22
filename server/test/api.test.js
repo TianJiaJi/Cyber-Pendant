@@ -39,6 +39,20 @@ async function loginAsAdmin(baseUrl) {
   return token;
 }
 
+async function loginAsWechatUser(baseUrl, code) {
+  const response = await fetch(`${baseUrl}/api/auth/wechat/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.ok(payload.token);
+  assert.ok(payload.user.id);
+  return payload;
+}
+
 async function postJson(url, token, body) {
   return fetch(url, {
     method: 'POST',
@@ -47,6 +61,15 @@ async function postJson(url, token, body) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
+  });
+}
+
+async function deleteWithToken(url, token) {
+  return fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
   });
 }
 
@@ -98,7 +121,12 @@ async function createTestBatch(baseUrl, token, clothingId, overrides = {}) {
 }
 
 test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN delete', async (t) => {
-  const app = await startTestServer();
+  const app = await startTestServer({
+    wechatAppId: 'wx-test-app',
+    wechatAppSecret: 'test-secret',
+    userTokenSecret: 'user-token-secret',
+    wechatCode2Session: async () => ({ openid: 'openid-legacy-binding' })
+  });
   t.after(app.close);
 
   const unauthorized = await fetch(`${app.baseUrl}/api/clothes`);
@@ -161,18 +189,28 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
       contactPhone: '12'
     })
   });
-  assert.equal(invalidBinding.status, 400);
+  assert.equal(invalidBinding.status, 401);
 
-  const bound = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const userLogin = await loginAsWechatUser(app.baseUrl, 'LEGACY_BINDING_CODE');
+
+  const invalidAuthenticatedBinding = await postJson(
+    `${app.baseUrl}/api/garments/${sn}/binding`,
+    userLogin.token,
+    {
+      studentName: '张三',
+      studentSchool: '第一实验学校',
+      studentClass: '三年级二班',
+      contactPhone: '12'
+    }
+  );
+  assert.equal(invalidAuthenticatedBinding.status, 400);
+
+  const bound = await postJson(`${app.baseUrl}/api/garments/${sn}/binding`, userLogin.token, {
       studentName: '张三',
       studentSchool: '第一实验学校',
       studentClass: '三年级二班',
       contactName: '张女士',
       contactPhone: '13800123456'
-    })
   });
   assert.equal(bound.status, 200);
   const boundGarment = (await bound.json()).garment;
@@ -183,18 +221,15 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   assert.equal(boundGarment.owner.phoneTail, '3456');
   assert.ok(boundGarment.owner.boundAt);
   assert.equal(boundGarment.ownerName, undefined);
-  assert.equal(boundGarment.binding, undefined);
-  assert.equal(boundGarment.owner.contactPhone, undefined);
+  assert.equal(boundGarment.binding.studentName, '张三');
+  assert.equal(boundGarment.binding.contactPhone, '13800123456');
+  assert.equal(boundGarment.owner.contactPhone, '13800123456');
 
-  const duplicateBinding = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const duplicateBinding = await postJson(`${app.baseUrl}/api/garments/${sn}/binding`, userLogin.token, {
       studentName: '李四',
       studentSchool: '第一实验学校',
       studentClass: '三年级三班',
       contactPhone: '13900125678'
-    })
   });
   assert.equal(duplicateBinding.status, 409);
 
@@ -262,6 +297,215 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
 
   const missingLookup = await fetch(`${app.baseUrl}/api/garments/${sn}`);
   assert.equal(missingLookup.status, 404);
+});
+
+test('wechat login, user-owned binding, lost report, contact reveal, and user center APIs', async (t) => {
+  const codeMap = new Map([
+    ['CODE_A', { openid: 'openid-user-a', session_key: 'ignored-a' }],
+    ['CODE_B', { openid: 'openid-user-b', session_key: 'ignored-b' }]
+  ]);
+  const app = await startTestServer({
+    wechatAppId: 'wx-test-app',
+    wechatAppSecret: 'test-secret',
+    userTokenSecret: 'user-token-secret',
+    wechatCode2Session: async (code) => codeMap.get(code) || { errcode: 40029, errmsg: 'invalid code' }
+  });
+  t.after(app.close);
+
+  const adminToken = await loginAsAdmin(app.baseUrl);
+  const clothing = await createTestClothing(app.baseUrl, adminToken, {
+    productName: '用户绑定测试校服'
+  });
+  const batch = await createTestBatch(app.baseUrl, adminToken, clothing.id, { count: 1 });
+  const sn = batch.garments[0].sn;
+
+  const invalidLogin = await fetch(`${app.baseUrl}/api/auth/wechat/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'BAD_CODE' })
+  });
+  assert.equal(invalidLogin.status, 401);
+
+  const userA = await loginAsWechatUser(app.baseUrl, 'CODE_A');
+  assert.equal(userA.user.openid, 'openid-user-a');
+  assert.equal(userA.user.bindingCount, 0);
+  assert.equal(userA.isNewUser, true);
+
+  const secondLogin = await loginAsWechatUser(app.baseUrl, 'CODE_A');
+  assert.equal(secondLogin.user.id, userA.user.id);
+  assert.equal(secondLogin.isNewUser, false);
+
+  const userB = await loginAsWechatUser(app.baseUrl, 'CODE_B');
+  assert.notEqual(userB.user.id, userA.user.id);
+
+  const publicBind = await fetch(`${app.baseUrl}/api/garments/${sn}/binding`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      studentName: '张三',
+      studentSchool: '第一实验学校',
+      studentClass: '三年级二班',
+      contactName: '张女士',
+      contactPhone: '13800123456'
+    })
+  });
+  assert.equal(publicBind.status, 401);
+
+  const bound = await postJson(`${app.baseUrl}/api/garments/${sn}/binding`, userA.token, {
+    studentName: '张三',
+    studentSchool: '第一实验学校',
+    studentClass: '三年级二班',
+    contactName: '张女士',
+    contactPhone: '13800123456'
+  });
+  assert.equal(bound.status, 200);
+  const boundGarment = (await bound.json()).garment;
+  assert.equal(boundGarment.isBound, true);
+  assert.equal(boundGarment.isOwner, true);
+  assert.equal(boundGarment.binding.contactPhone, '13800123456');
+
+  const duplicateByOtherUser = await postJson(
+    `${app.baseUrl}/api/garments/${sn}/binding`,
+    userB.token,
+    {
+      studentName: '李四',
+      studentSchool: '第二实验学校',
+      studentClass: '四年级一班',
+      contactName: '李女士',
+      contactPhone: '13900123456'
+    }
+  );
+  assert.equal(duplicateByOtherUser.status, 409);
+
+  const deniedUpdate = await putJson(`${app.baseUrl}/api/garments/${sn}/binding`, userB.token, {
+    studentClass: '四年级二班',
+    contactPhone: '13900123456'
+  });
+  assert.equal(deniedUpdate.status, 403);
+
+  const updatedBinding = await putJson(`${app.baseUrl}/api/garments/${sn}/binding`, userA.token, {
+    studentName: '张三',
+    studentSchool: '第一实验学校',
+    studentClass: '三年级三班',
+    contactName: '张女士',
+    contactPhone: '13800123456'
+  });
+  assert.equal(updatedBinding.status, 200);
+  assert.equal((await updatedBinding.json()).garment.binding.className, '三年级三班');
+
+  const myGarments = await fetch(`${app.baseUrl}/api/user/garments`, {
+    headers: { Authorization: `Bearer ${userA.token}` }
+  });
+  assert.equal(myGarments.status, 200);
+  assert.equal((await myGarments.json()).garments.length, 1);
+
+  const logs = await fetch(`${app.baseUrl}/api/user/binding-logs`, {
+    headers: { Authorization: `Bearer ${userA.token}` }
+  });
+  assert.equal(logs.status, 200);
+  assert.deepEqual(
+    (await logs.json()).logs.map((log) => log.action),
+    ['modify', 'bind']
+  );
+
+  const deniedLostReport = await postJson(
+    `${app.baseUrl}/api/garments/${sn}/report-lost`,
+    userB.token,
+    { note: '不是绑定人不能报失' }
+  );
+  assert.equal(deniedLostReport.status, 403);
+
+  const lostReport = await postJson(
+    `${app.baseUrl}/api/garments/${sn}/report-lost`,
+    userA.token,
+    { note: '操场附近遗失' }
+  );
+  assert.equal(lostReport.status, 201);
+  const lostPayload = await lostReport.json();
+  assert.equal(lostPayload.report.status, 'active');
+  assert.match(lostPayload.report.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  const publicLostLookup = await fetch(`${app.baseUrl}/api/garments/${sn}?track=0`);
+  assert.equal(publicLostLookup.status, 200);
+  const publicLostGarment = (await publicLostLookup.json()).garment;
+  assert.equal(publicLostGarment.lostReport.status, 'active');
+  assert.equal(publicLostGarment.owner.contactName, '张女士');
+  assert.equal(publicLostGarment.owner.contactPhone, '13800123456');
+
+  const reveal = await postJson(`${app.baseUrl}/api/garments/${sn}/contact-reveal`, userB.token, {
+    source: 'detail'
+  });
+  assert.equal(reveal.status, 200);
+  assert.equal((await reveal.json()).contact.contactPhone, '13800123456');
+
+  const myReports = await fetch(`${app.baseUrl}/api/user/lost-reports`, {
+    headers: { Authorization: `Bearer ${userA.token}` }
+  });
+  assert.equal(myReports.status, 200);
+  assert.equal((await myReports.json()).reports.length, 1);
+
+  const stats = await fetch(`${app.baseUrl}/api/admin/stats`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  });
+  assert.equal(stats.status, 200);
+  const statsPayload = await stats.json();
+  assert.equal(statsPayload.users.total, 2);
+  assert.equal(statsPayload.garments.bound, 1);
+  assert.equal(statsPayload.reports.active, 1);
+  assert.equal(statsPayload.today.bindings, 2);
+
+  const adminUsers = await fetch(`${app.baseUrl}/api/admin/users`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  });
+  assert.equal(adminUsers.status, 200);
+  const adminUsersPayload = await adminUsers.json();
+  assert.equal(adminUsersPayload.users.length, 2);
+  assert.ok(adminUsersPayload.users.some((user) => user.openid === 'openid-user-a'));
+
+  const banned = await fetch(`${app.baseUrl}/api/admin/users/${userA.user.id}/ban`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${adminToken}` }
+  });
+  assert.equal(banned.status, 200);
+  assert.equal((await banned.json()).user.status, 'banned');
+
+  const bannedLogin = await fetch(`${app.baseUrl}/api/auth/wechat/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: 'CODE_A' })
+  });
+  assert.equal(bannedLogin.status, 403);
+
+  const unbanned = await fetch(`${app.baseUrl}/api/admin/users/${userA.user.id}/unban`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${adminToken}` }
+  });
+  assert.equal(unbanned.status, 200);
+  assert.equal((await unbanned.json()).user.status, 'active');
+
+  const exportedUsers = await fetch(`${app.baseUrl}/api/admin/export/users`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  });
+  assert.equal(exportedUsers.status, 200);
+  assert.match(exportedUsers.headers.get('content-type'), /^text\/csv/);
+  assert.match(await exportedUsers.text(), /openid-user-a/);
+
+  for (const type of ['garments', 'reports', 'binding-logs']) {
+    const exported = await fetch(`${app.baseUrl}/api/admin/export/${type}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(exported.status, 200);
+    assert.match(exported.headers.get('content-type'), /^text\/csv/);
+    assert.ok((await exported.text()).length > 0);
+  }
+
+  const closed = await deleteWithToken(`${app.baseUrl}/api/garments/${sn}/report-lost`, userA.token);
+  assert.equal(closed.status, 200);
+  assert.equal((await closed.json()).report.status, 'cancelled');
+
+  const unboundByOwner = await deleteWithToken(`${app.baseUrl}/api/garments/${sn}/binding`, userA.token);
+  assert.equal(unboundByOwner.status, 200);
+  assert.equal((await unboundByOwner.json()).garment.isBound, false);
 });
 
 test('serves admin console from configurable backend path', async (t) => {

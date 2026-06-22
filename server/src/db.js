@@ -287,6 +287,8 @@ export function migrateDatabase(db, config) {
   seedAdmin(db, config);
   seedDemoData(db);
   backfillThreeLayerData(db);
+  ensureBindingLogsActorTypeColumn(db);
+  ensureLostReportsColumns(db);
 }
 
 function ensureGarmentColumn(db, columnName) {
@@ -323,6 +325,21 @@ function ensureGarmentBindingColumns(db) {
   ensureGarmentTextColumn(db, 'owner_name');
   ensureGarmentTextColumn(db, 'owner_phone_tail');
   ensureGarmentTextColumn(db, 'owner_bound_at');
+}
+
+function ensureBindingLogsActorTypeColumn(db) {
+  if (!columnExists(db, 'binding_logs', 'actor_type')) {
+    db.exec('ALTER TABLE binding_logs ADD COLUMN actor_type TEXT NOT NULL DEFAULT \'user\';');
+  }
+}
+
+function ensureLostReportsColumns(db) {
+  if (!columnExists(db, 'lost_reports', 'closed_at')) {
+    db.exec('ALTER TABLE lost_reports ADD COLUMN closed_at TEXT;');
+  }
+  if (!columnExists(db, 'lost_reports', 'close_reason')) {
+    db.exec('ALTER TABLE lost_reports ADD COLUMN close_reason TEXT;');
+  }
 }
 
 function seedAdmin(db, config) {

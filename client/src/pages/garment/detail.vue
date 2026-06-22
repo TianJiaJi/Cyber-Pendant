@@ -475,9 +475,13 @@ async function submitBinding() {
 }
 
 .phone-shell {
+  height: 100vh;
   min-height: 100vh;
   max-width: 480px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 244, 237, 0.96) 18%, #f7f3ec 100%);
   color: #151515;
@@ -495,6 +499,10 @@ async function submitBinding() {
 /* #endif */
 
 .detail-topbar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: grid;
   grid-template-columns: 128rpx minmax(0, 1fr) 128rpx;
   align-items: center;
@@ -502,6 +510,7 @@ async function submitBinding() {
   padding: 0 34rpx;
   border-bottom: 1px solid rgba(210, 202, 190, 0.78);
   background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18rpx);
 }
 
 .nav-button,
@@ -584,6 +593,10 @@ async function submitBinding() {
 }
 
 .state-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 42rpx 36rpx;
 }
 
@@ -645,6 +658,10 @@ async function submitBinding() {
 }
 
 .detail-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 54rpx;
 }
 
@@ -1184,10 +1201,14 @@ async function submitBinding() {
 
 @media (min-width: 720px) {
   .detail-page {
+    height: 100vh;
+    overflow: hidden;
     padding: 24px 0;
   }
 
   .phone-shell {
+    height: calc(100vh - 48px);
+    min-height: 0;
     border-radius: 18px;
     overflow: hidden;
     box-shadow:

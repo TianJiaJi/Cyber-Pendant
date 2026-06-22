@@ -83,12 +83,15 @@
           </view>
         </view>
       </view>
+
+      <AppFooter active="home" />
     </view>
   </view>
 </template>
 
 <script setup>
 import { nextTick, onBeforeUnmount, ref } from 'vue';
+import AppFooter from '../../components/AppFooter.vue';
 import { getPublicGarment } from '../../utils/api.js';
 import { extractSnFromScan, scanWithPlatform } from '../../utils/scanner.js';
 

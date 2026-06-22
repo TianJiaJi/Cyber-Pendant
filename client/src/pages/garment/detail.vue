@@ -141,6 +141,8 @@
         </view>
       </view>
 
+      <AppFooter active="home" />
+
       <view v-if="bindingPanelVisible" class="bind-overlay">
         <view class="bind-panel" @click.stop>
           <view class="bind-panel-header">
@@ -218,6 +220,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
+import AppFooter from '../../components/AppFooter.vue';
 import { bindPublicGarment, getPublicGarment, qrcodeUrl } from '../../utils/api.js';
 
 const loading = ref(true);

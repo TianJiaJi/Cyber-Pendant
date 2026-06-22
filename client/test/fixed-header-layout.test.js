@@ -13,6 +13,10 @@ function readVueStyle(relativePath) {
   return match[1];
 }
 
+function readVueFile(relativePath) {
+  return readFileSync(path.join(clientRoot, relativePath), 'utf8');
+}
+
 function baseCss(css) {
   return css.split(/\n@media\b/)[0];
 }
@@ -31,8 +35,14 @@ function assertDeclarations(cssBlock, selector, declarations) {
 }
 
 test('user pages keep custom topbars fixed while content areas scroll', () => {
+  const homeFile = readVueFile('src/pages/index/index.vue');
+  const detailFile = readVueFile('src/pages/garment/detail.vue');
   const homeStyle = baseCss(readVueStyle('src/pages/index/index.vue'));
   const detailStyle = baseCss(readVueStyle('src/pages/garment/detail.vue'));
+  const footerStyle = baseCss(readVueStyle('src/components/AppFooter.vue'));
+
+  assert.match(homeFile, /<AppFooter\s+active="home"\s*\/>/, 'home page should render the app footer');
+  assert.match(detailFile, /<AppFooter\s+active="home"\s*\/>/, 'detail page should render the app footer');
 
   for (const [style, pageName] of [
     [homeStyle, 'home'],
@@ -72,4 +82,15 @@ test('user pages keep custom topbars fixed while content areas scroll', () => {
       /overflow-y:\s*auto;/
     ]);
   }
+
+  assertDeclarations(block(footerStyle, '.app-footer'), '.app-footer', [
+    /flex:\s*0 0 auto;/,
+    /position:\s*sticky;/,
+    /bottom:\s*0;/,
+    /z-index:\s*\d+;/
+  ]);
+  assertDeclarations(block(footerStyle, '.footer-grid'), '.footer-grid', [
+    /display:\s*grid;/,
+    /grid-template-columns:\s*1fr 1fr;/
+  ]);
 });

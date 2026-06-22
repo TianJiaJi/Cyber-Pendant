@@ -140,6 +140,15 @@ function logout() {
   garments.value = [];
   reports.value = [];
   logs.value = [];
+  uni.showToast({
+    title: '已退出登录',
+    icon: 'success'
+  });
+  setTimeout(() => {
+    uni.reLaunch({
+      url: '/pages/user/index'
+    });
+  }, 350);
 }
 
 async function loadUserData() {

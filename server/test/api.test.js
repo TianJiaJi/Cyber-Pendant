@@ -364,6 +364,22 @@ test('wechat login, user-owned binding, lost report, contact reveal, and user ce
   assert.equal(boundGarment.isOwner, true);
   assert.equal(boundGarment.binding.contactPhone, '13800123456');
 
+  const anonymousBoundLookup = await fetch(`${app.baseUrl}/api/garments/${sn}?track=0`);
+  assert.equal(anonymousBoundLookup.status, 200);
+  const anonymousBoundGarment = (await anonymousBoundLookup.json()).garment;
+  assert.equal(anonymousBoundGarment.isBound, true);
+  assert.equal(anonymousBoundGarment.owner, null);
+  assert.equal(anonymousBoundGarment.binding, undefined);
+
+  const loggedInOtherLookup = await fetch(`${app.baseUrl}/api/garments/${sn}?track=0`, {
+    headers: { Authorization: `Bearer ${userB.token}` }
+  });
+  assert.equal(loggedInOtherLookup.status, 200);
+  const loggedInOtherGarment = (await loggedInOtherLookup.json()).garment;
+  assert.equal(loggedInOtherGarment.isBound, true);
+  assert.equal(loggedInOtherGarment.owner.name, '张*');
+  assert.equal(loggedInOtherGarment.owner.contactPhone, undefined);
+
   const duplicateByOtherUser = await postJson(
     `${app.baseUrl}/api/garments/${sn}/binding`,
     userB.token,
@@ -429,14 +445,26 @@ test('wechat login, user-owned binding, lost report, contact reveal, and user ce
   assert.equal(publicLostLookup.status, 200);
   const publicLostGarment = (await publicLostLookup.json()).garment;
   assert.equal(publicLostGarment.lostReport.status, 'active');
-  assert.equal(publicLostGarment.owner.contactName, '张女士');
-  assert.equal(publicLostGarment.owner.contactPhone, '13800123456');
+  assert.equal(publicLostGarment.owner, null);
+
+  const anonymousReveal = await fetch(`${app.baseUrl}/api/garments/${sn}/contact-reveal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: 'detail' })
+  });
+  assert.equal(anonymousReveal.status, 401);
 
   const reveal = await postJson(`${app.baseUrl}/api/garments/${sn}/contact-reveal`, userB.token, {
     source: 'detail'
   });
   assert.equal(reveal.status, 200);
   assert.equal((await reveal.json()).contact.contactPhone, '13800123456');
+
+  const ownerReveal = await postJson(`${app.baseUrl}/api/garments/${sn}/contact-reveal`, userA.token, {
+    source: 'detail'
+  });
+  assert.equal(ownerReveal.status, 200);
+  assert.equal((await ownerReveal.json()).garment.isOwner, true);
 
   const myReports = await fetch(`${app.baseUrl}/api/user/lost-reports`, {
     headers: { Authorization: `Bearer ${userA.token}` }

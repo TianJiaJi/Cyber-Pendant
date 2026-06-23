@@ -8,6 +8,8 @@ metadata:
 
 # Cyber-Pendant 实施计划（更新版）
 
+> 文档状态：历史实施计划。文档中的用户系统、绑定鉴权、防丢、用户中心、后台用户管理、统计和导出多数已经实现；剩余事项应作为后续路线参考，而不是当前缺口清单。当前实现状态请阅读 [current-system-state.md](current-system-state.md)，交付流程请阅读 [operations-handbook.md](operations-handbook.md)。
+
 **项目规模**: 3 所学校
 **新增需求**: 数据统计 + 数据导出
 

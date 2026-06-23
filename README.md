@@ -1,39 +1,47 @@
 # Cyber-Pendant
 
-Cyber-Pendant 是一个校服数字吊牌系统：用户扫码或输入 SN 码查看校服溯源信息，管理员在后台录入衣服主档、生成批次 SN 和二维码。
+Cyber-Pendant 是一个面向校服吊牌的数字溯源与防丢系统。管理员在后台维护衣服主档、生产批次和 SN，系统生成传统正方形二维码；用户通过微信小程序或 H5 扫码进入公开详情页，完成真伪核验、学生信息绑定、报失和联系方式披露。
 
 ![后端托管管理台示意图](assets/cyber-pendant-readme-illustrations/01-server-admin-separation.png)
 
-这个仓库现在把“用户端”和“管理台”拆开了：
+## 当前能力
 
-- `client/` 只放用户页面，后续可以单独打包成 H5 或微信小程序。
-- `server/admin/` 是独立 Vue 管理台。
-- `server/` 启动后会自动准备并托管管理台，默认访问 `http://localhost:8787/admin/`。
+- 管理衣服主档、生产批次、颜色尺码、生产日期、执行标准和厂家信息。
+- 批量生成唯一 SN，支持按批次导出 Excel / CSV 清单。
+- 生成传统正方形二维码，二维码内容为公开详情页链接。
+- 小程序扫码可从链接、`sn`、`scene` 或编码后的 `scene=sn%3D...` 中提取 SN。
+- 用户可通过微信登录绑定校服，绑定记录会进入审计日志。
+- 绑定用户可报告丢失、取消报失；拾获者登录后可查看完整联系方式。
+- 管理员可查看用户、封禁/解封用户、查看统计并导出用户、吊牌、报告和绑定日志。
+- 后端启动时可自动安装并构建管理台，默认托管在 `/admin/`。
 
-## 你能用它做什么
+## 系统入口
 
-- 给每件校服生成唯一 SN 码。
-- 生成可印刷的二维码，扫码后进入公开吊牌详情页。
-- 管理衣服主档、生产批次、颜色尺码、生产日期和执行标准。
-- 查看 SN 查询次数、停用异常吊牌、真删除测试数据。
-- 让家长或学生绑定学生信息，后台可查看完整绑定信息并解绑。
-- 按批次导出 Excel 或 CSV 清单，方便印刷、贴标和交付。
+| 入口 | 默认地址 | 说明 |
+|------|----------|------|
+| 管理后台 | `http://localhost:8787/admin/` | 管理衣服、批次、SN、用户、统计和导出 |
+| API 健康检查 | `http://localhost:8787/api/health` | 检查后端和数据库路径 |
+| 用户端 H5 | `http://localhost:5173` | 本地调试用户查询、绑定和报失 |
+| 吊牌详情 | `/#/pages/garment/detail?sn=...` | 二维码跳转的公开详情页 |
+| 微信小程序 | `dist/build/mp-weixin` | `npm --prefix client run build:mp-weixin` 输出目录 |
+
+演示 SN：
+
+```text
+CP20260615DEMO01
+```
 
 ## 快速启动
 
-### 1. 安装后端依赖
+### 1. 安装依赖
 
 ```bash
 npm --prefix server install
-```
-
-管理台依赖不需要你单独管。启动后端时，如果 `server/admin/dist` 不存在或后台源码更新了，后端会自动安装并构建管理台。
-
-如果还要开发用户端 H5 或小程序，再安装客户端依赖：
-
-```bash
 npm --prefix client install
+npm --prefix server/admin install
 ```
+
+后端启动时会检查 `server/admin/dist`。如果管理台未构建或源码比构建产物更新，后端会自动安装并构建管理台。
 
 ### 2. 配置环境变量
 
@@ -41,14 +49,20 @@ npm --prefix client install
 cp server/.env.example server/.env
 ```
 
-首次运行前请编辑 `server/.env`，至少设置：
+至少设置：
 
 ```env
 ADMIN_PASSWORD=your-admin-password
 TOKEN_SECRET=replace-with-a-long-random-secret
+USER_TOKEN_SECRET=replace-with-a-different-long-random-secret
 ```
 
-默认管理员用户名是 `admin`。
+微信小程序登录还需要：
+
+```env
+WECHAT_APP_ID=your-wechat-mini-program-appid
+WECHAT_APP_SECRET=your-wechat-mini-program-secret
+```
 
 ### 3. 启动后端和管理台
 
@@ -56,17 +70,15 @@ TOKEN_SECRET=replace-with-a-long-random-secret
 npm run dev
 ```
 
-启动后打开：
+访问：
 
 ```text
 http://localhost:8787/admin/
 ```
 
-第一次启动可能会多花几秒，因为后端会自动准备管理台构建产物。之后只要后台源码没变，启动会快很多。
-
 ### 4. 启动用户端 H5
 
-用户端是独立的 uni-app 项目，开发时另开一个终端：
+另开一个终端：
 
 ```bash
 npm run dev:client
@@ -78,65 +90,89 @@ npm run dev:client
 http://localhost:5173
 ```
 
-## 常用入口
+### 5. 构建微信小程序
 
-| 入口 | 地址 | 说明 |
-|------|------|------|
-| 管理后台 | `http://localhost:8787/admin/` | 后端托管，登录后管理衣服、批次和 SN |
-| API 健康检查 | `http://localhost:8787/api/health` | 确认后端是否正常运行 |
-| 用户端 H5 | `http://localhost:5173` | 本地开发时的扫码/查询页面 |
-| 吊牌详情 | `/#/pages/garment/detail?sn=...` | 二维码最终跳转的公开详情页 |
-
-演示 SN：
-
-```text
-CP20260615DEMO01
+```bash
+npm --prefix client run build:mp-weixin
 ```
 
-## 推荐工作流
+构建后用微信开发者工具导入：
 
-1. 在管理后台新增衣服主档。
-2. 进入衣服详情，填写款号、颜色、尺码、批次和数量。
-3. 批量生成 SN 和二维码。
-4. 导出 Excel 或 CSV，交给印刷或贴标流程。
-5. 用户扫码进入公开详情页，查看校服信息。
-6. 如需学生身份绑定，用户在详情页提交信息，后台可查看并解绑。
+```text
+client/dist/build/mp-weixin
+```
+
+小程序真机调试时，`client/.env.local` 中的 `VITE_API_BASE_URL` 需要配置成手机可访问的局域网 IP 或 HTTPS 域名。
+
+## 推荐业务流程
+
+1. 管理员登录后台，新增衣服主档。
+2. 在衣服详情中创建生产批次，填写款号、颜色、尺码、批次标签和数量。
+3. 系统批量生成 SN 和传统正方形二维码。
+4. 导出 Excel 或 CSV，交给印刷、贴标或交付流程。
+5. 用户扫码或输入 SN，查看公开吊牌详情。
+6. 用户微信登录后绑定学生姓名、学校、班级和联系方式。
+7. 校服丢失时，绑定用户报告丢失；拾获者扫码并登录后查看联系方式。
+8. 管理员在后台查看统计、用户状态、绑定日志和导出数据。
+
+## 二维码策略
+
+系统当前统一使用传统正方形二维码：
+
+- 二维码接口：`GET /api/qrcode/{sn}?type=url`
+- 二维码内容：`FRONTEND_BASE_URL/#/pages/garment/detail?sn={SN}`
+- 管理台导出：使用详情页链接和二维码图片链接，不再导出微信小程序码 `scene` 字段。
+- 兼容处理：历史请求 `type=mini-program` 会回落为普通链接二维码。
+
+扫码解析支持以下输入：
+
+```text
+https://example.com/#/pages/garment/detail?sn=CP20260615DEMO01
+pages/garment/detail?scene=CP20260615DEMO01
+scene=sn%3DCP20260615DEMO01
+CP20260615DEMO01
+```
 
 ## 项目结构
 
 ```text
 cyber-pendant/
-├── client/                    # 用户端 uni-app，面向 H5 / 微信小程序
-│   ├── src/pages/index/        # SN 输入和扫码入口
-│   ├── src/pages/garment/      # 公开吊牌详情页
-│   ├── src/utils/api.js        # 公开查询和绑定 API
-│   └── src/utils/scanner.js    # H5 / 小程序扫码适配
-├── server/                    # Node.js API 服务
-│   ├── admin/                  # 独立 Vue 管理台源码
-│   ├── src/api.js              # HTTP 路由、API 和后台静态托管
-│   ├── src/config.js           # 环境变量和路径配置
-│   ├── src/db.js               # SQLite 表结构、迁移和查询
-│   ├── src/index.js            # 服务入口，启动前自动准备管理台
-│   ├── src/prepare-admin.js    # 管理台自动安装/构建逻辑
-│   └── test/api.test.js        # 后端测试
-└── data/                       # 本地 SQLite 数据库，运行时生成
+├── client/                         # 用户端 uni-app，面向 H5 / 微信小程序
+│   ├── src/pages/index/             # SN 输入和扫码入口
+│   ├── src/pages/garment/           # 公开吊牌详情、绑定和报失
+│   ├── src/pages/login/             # 微信登录页
+│   ├── src/pages/user/              # 用户中心
+│   ├── src/utils/api.js             # 用户端 API 封装
+│   └── src/utils/scanner.js         # H5 / 小程序扫码适配
+├── server/                         # Node.js API 服务
+│   ├── admin/                       # Vue 管理台源码
+│   ├── src/api.js                   # HTTP 路由、API 和后台静态托管
+│   ├── src/auth.js                  # 管理员 token、用户 token、微信 code2session
+│   ├── src/config.js                # 环境变量和路径配置
+│   ├── src/db.js                    # SQLite 表结构、迁移和查询
+│   ├── src/index.js                 # 服务入口
+│   ├── src/prepare-admin.js         # 管理台自动安装/构建
+│   └── test/api.test.js             # 后端集成测试
+├── memory/                         # 设计、交付、状态和安全文档
+└── data/                           # 本地 SQLite 数据库，运行时生成
 ```
 
 ## 架构说明
 
 ### 用户端
 
-`client/` 只保留公开页面：
+`client/` 使用 uni-app + Vue 3：
 
-- 首页：输入 SN 或扫码。
-- 吊牌详情：展示衣服信息、批次信息、二维码、查询次数和绑定状态。
-- 绑定表单：提交学生姓名、学校、班级和联系电话。
+- 首页：输入 SN 或调用扫码能力。
+- 详情页：展示主档、批次、二维码、查询次数、绑定状态、报失状态和联系方式披露入口。
+- 登录页：调用 `uni.login`，把微信 `code` 发给后端换取用户 token。
+- 用户中心：展示我的校服、有效报失、丢失报告和绑定记录。
 
-用户端不包含任何后台页面和后台依赖，适合后续单独打包微信小程序。
+小程序页面使用自定义导航栏，顶部栏需要避开微信右上角系统胶囊区域。
 
 ### 管理台
 
-`server/admin/` 是普通 Vue 3 + Vite + Vue Router 应用，路由使用 hash 模式：
+`server/admin/` 是 Vue 3 + Vite + Vue Router 应用，使用 hash 路由：
 
 ```text
 #/login
@@ -150,7 +186,7 @@ cyber-pendant/
 server/admin/dist
 ```
 
-后端默认把它托管在：
+后端默认托管在：
 
 ```text
 /admin/
@@ -158,17 +194,16 @@ server/admin/dist
 
 ### 后端
 
-后端使用 Node.js 内置模块实现：
+后端使用 Node.js 内置模块和 SQLite：
 
 - `node:http` 提供 HTTP 服务。
 - `node:sqlite` 存储数据。
 - PBKDF2 保存管理员密码。
-- HMAC token 做后台登录鉴权。
-- `qrcode` 生成二维码图片。
+- HMAC token 区分管理员和用户身份。
+- `qrcode` 生成传统正方形二维码。
+- SQLite 开启 `foreign_keys` 和 `WAL`。
 
-后端启动时会执行 `ensureAdminBuild()`：如果管理台没安装依赖、没构建，或源码比构建产物新，就自动执行对应的 `npm install` / `npm run build`。
-
-如确实想跳过自动构建，可设置：
+后端启动时会执行 `ensureAdminBuild()`。如需跳过自动构建：
 
 ```bash
 ADMIN_AUTO_BUILD=0 npm run dev
@@ -178,15 +213,19 @@ SKIP_ADMIN_BUILD=1 npm run dev
 
 ## 数据模型
 
-系统按三层管理吊牌数据：
-
 | 表 | 含义 | 主要字段 |
 |----|------|----------|
+| `admins` | 管理员 | 用户名、密码哈希、创建时间 |
+| `users` | 微信用户 | openid、昵称、头像、状态、绑定数、报失数、最后登录时间 |
 | `clothes` | 衣服主档 | 商品名、面料、执行标准、安全类别、等级、厂家、洗护说明、状态 |
-| `garment_batches` | 生产批次 | 款号、颜色、尺码、批次标签、生产日期、批次备注、状态 |
-| `garments` | SN 明细 | SN、衣服 ID、批次 ID、查询次数、绑定信息、状态 |
+| `garment_batches` | 生产批次 | 款号、颜色、尺码、批次标签、生产日期、备注、状态 |
+| `garments` | SN 明细 | SN、主档 ID、批次 ID、查询次数、绑定信息、报失 ID、状态 |
+| `binding_logs` | 绑定审计 | SN、用户、操作类型、前后快照、IP、User-Agent |
+| `lost_reports` | 丢失报告 | SN、报告人、状态、曝光次数、过期时间、关闭原因 |
+| `contact_reveal_logs` | 联系方式曝光日志 | SN、报失记录、用户、来源、IP、User-Agent |
+| `garment_styles` | 旧数据兼容 | 旧版单表数据迁移来源 |
 
-公开吊牌详情页会组合这三层数据展示。编辑衣服主档或批次后，已生成 SN 的公开展示会同步更新。
+公开详情页会组合主档、批次、SN、绑定和报失数据。编辑主档或批次后，已生成 SN 的公开展示会同步更新。
 
 ## 命令速查
 
@@ -198,15 +237,19 @@ npm start
 # 用户端
 npm run dev:client
 npm run build:client
+npm --prefix client run dev:mp-weixin
 npm --prefix client run build:mp-weixin
 
 # 管理台
-npm run dev:admin       # 可选：热更新开发
-npm run build:admin     # 可选：手动构建
+npm run dev:admin
+npm run build:admin
+npm --prefix server/admin run preview
 
 # 测试
 npm test
 node --test server/test/*.test.js
+node --test client/test/fixed-header-layout.test.js
+node --test server/admin/test/admin-ui.test.js
 ```
 
 ## 环境变量
@@ -218,14 +261,20 @@ node --test server/test/*.test.js
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | `8787` | 后端监听端口 |
-| `DATABASE_PATH` | `../data/cyber-pendant.sqlite` | SQLite 数据库路径 |
-| `FRONTEND_BASE_URL` | `http://localhost:5173` | 用户端地址，用于生成二维码详情链接 |
+| `DATABASE_PATH` | `data/cyber-pendant.sqlite` | SQLite 数据库路径 |
+| `FRONTEND_BASE_URL` | `http://localhost:5173` | 用户端地址，用于生成详情链接二维码 |
 | `ADMIN_BASE_PATH` | `/admin` | 后端托管管理台的访问路径 |
-| `ADMIN_STATIC_DIR` | `admin/dist` | 管理台构建产物目录 |
+| `ADMIN_STATIC_DIR` | `server/admin/dist` | 管理台构建产物目录 |
 | `CORS_ORIGIN` | `*` | CORS 允许来源 |
-| `TOKEN_SECRET` | 无 | 后台 token 签名密钥，必须设置 |
+| `TOKEN_SECRET` | 随机临时值 | 管理员 token 签名密钥，生产必须固定配置 |
+| `USER_TOKEN_SECRET` | 同 `TOKEN_SECRET` | 用户 token 签名密钥，生产建议单独配置 |
+| `USER_TOKEN_TTL_DAYS` | `30` | 用户 token 有效天数 |
+| `WECHAT_APP_ID` | 空 | 微信小程序 AppID |
+| `WECHAT_APP_SECRET` | 空 | 微信小程序 AppSecret |
 | `ADMIN_USERNAME` | `admin` | 默认管理员用户名 |
-| `ADMIN_PASSWORD` | 无 | 默认管理员密码，必须设置 |
+| `ADMIN_PASSWORD` | 空 | 默认管理员密码，必须设置 |
+
+历史小程序码配置项（`WECHAT_QR_*`）仍可出现在 `.env.example` 中，但当前二维码策略不再调用微信小程序码接口。
 
 ### 用户端
 
@@ -237,7 +286,7 @@ node --test server/test/*.test.js
 
 ### 管理台开发
 
-`server/admin/.env.local`，仅独立运行 `npm run dev:admin` 时需要：
+`server/admin/.env.local`：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -248,25 +297,49 @@ node --test server/test/*.test.js
 
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
+| `GET` | `/api/health` | 健康检查 | 否 |
 | `POST` | `/api/auth/login` | 管理员登录 | 否 |
-| `GET` | `/api/clothes` | 衣服主档列表 | 是 |
-| `POST` | `/api/clothes` | 新增衣服主档 | 是 |
-| `GET` | `/api/clothes/{id}` | 衣服主档详情 | 是 |
-| `PUT` | `/api/clothes/{id}` | 更新衣服主档 | 是 |
-| `DELETE` | `/api/clothes/{id}?hard=0\|1` | 停用或真删除衣服 | 是 |
-| `GET` | `/api/clothes/{id}/batches` | 衣服下的批次和 SN | 是 |
-| `POST` | `/api/clothes/{id}/batches` | 创建批次并批量生成 SN | 是 |
-| `PUT` | `/api/batches/{id}` | 更新或启用批次 | 是 |
-| `DELETE` | `/api/batches/{id}?hard=0\|1` | 停用或真删除批次 | 是 |
-| `GET` | `/api/garments` | SN 列表和筛选 | 是 |
-| `POST` | `/api/garments` | 兼容旧流程：创建单个吊牌 | 是 |
+| `POST` | `/api/auth/wechat/login` | 微信用户登录 | 否 |
+| `GET` | `/api/user/garments` | 我的校服 | 用户 |
+| `GET` | `/api/user/lost-reports` | 我的丢失报告 | 用户 |
+| `GET` | `/api/user/binding-logs` | 我的绑定记录 | 用户 |
+| `GET` | `/api/admin/users` | 用户列表 | 管理员 |
+| `GET` | `/api/admin/users/{id}` | 用户详情 | 管理员 |
+| `POST` | `/api/admin/users/{id}/ban` | 封禁用户 | 管理员 |
+| `POST` | `/api/admin/users/{id}/unban` | 解封用户 | 管理员 |
+| `GET` | `/api/admin/stats` | 管理统计 | 管理员 |
+| `GET` | `/api/admin/export/{type}` | 导出 CSV | 管理员 |
+| `GET` | `/api/clothes` | 衣服主档列表 | 管理员 |
+| `POST` | `/api/clothes` | 新增衣服主档 | 管理员 |
+| `GET` | `/api/clothes/{id}` | 衣服主档详情 | 管理员 |
+| `PUT` | `/api/clothes/{id}` | 更新衣服主档 | 管理员 |
+| `DELETE` | `/api/clothes/{id}?hard=0\|1` | 停用或真删除衣服 | 管理员 |
+| `GET` | `/api/clothes/{id}/batches` | 衣服下的批次和 SN | 管理员 |
+| `POST` | `/api/clothes/{id}/batches` | 创建批次并批量生成 SN | 管理员 |
+| `PUT` | `/api/batches/{id}` | 更新或启用批次 | 管理员 |
+| `DELETE` | `/api/batches/{id}?hard=0\|1` | 停用或真删除批次 | 管理员 |
+| `GET` | `/api/garments` | SN 列表和筛选 | 管理员 |
+| `POST` | `/api/garments` | 兼容旧流程：创建单个吊牌 | 管理员 |
 | `GET` | `/api/garments/{sn}` | 公开查询吊牌详情 | 否 |
-| `PUT` | `/api/garments/{sn}` | 更新 SN 状态 | 是 |
-| `DELETE` | `/api/garments/{sn}?hard=0\|1` | 停用或真删除 SN | 是 |
-| `POST` | `/api/garments/{sn}/binding` | 用户绑定学生信息 | 否 |
-| `DELETE` | `/api/garments/{sn}/binding` | 后台解绑学生信息 | 是 |
-| `POST` | `/api/sn/generate` | 生成唯一 SN | 是 |
+| `PUT` | `/api/garments/{sn}` | 更新 SN 状态 | 管理员 |
+| `DELETE` | `/api/garments/{sn}?hard=0\|1` | 停用或真删除 SN | 管理员 |
+| `POST` | `/api/garments/{sn}/binding` | 绑定学生信息 | 用户 |
+| `PUT` | `/api/garments/{sn}/binding` | 修改本人绑定信息 | 用户 |
+| `DELETE` | `/api/garments/{sn}/binding` | 用户本人解绑或管理员解绑 | 用户 / 管理员 |
+| `POST` | `/api/garments/{sn}/report-lost` | 报告丢失 | 用户本人 |
+| `DELETE` | `/api/garments/{sn}/report-lost` | 取消报失 | 用户本人 / 管理员 |
+| `POST` | `/api/garments/{sn}/contact-reveal` | 披露联系方式并记录曝光 | 用户 |
+| `POST` | `/api/sn/generate` | 生成唯一 SN | 管理员 |
 | `GET` | `/api/qrcode/{sn}?type=sn\|url` | 获取二维码图片 | 否 |
+
+`/api/admin/export/{type}` 支持：
+
+```text
+users
+garments
+reports
+binding-logs
+```
 
 ## SN 规则
 
@@ -276,17 +349,21 @@ SN 格式：
 CP{YYYYMMDD}{6位随机字符}
 ```
 
-示例：
-
-```text
-CP20260615DEMO01
-```
-
 随机字符会避开容易混淆的 `0`、`O`、`I`、`1`。
+
+## 安全与隐私
+
+- 用户绑定、解绑、报失和联系方式披露都由服务端验证 token 与数据库状态。
+- 正常状态只返回脱敏绑定信息；完整联系方式只在报失后通过披露接口返回。
+- 管理员可查看完整绑定信息，但用户端不依赖客户端隐藏敏感字段。
+- 绑定操作、解绑操作、联系方式披露会记录审计信息。
+- 生产环境必须固定配置 `TOKEN_SECRET`、`USER_TOKEN_SECRET` 和 `ADMIN_PASSWORD`。
+
+更多原则见 [memory/security-principles.md](memory/security-principles.md)。
 
 ## 删除和停用
 
-默认删除是“停用”：
+默认删除是停用：
 
 - 衣服停用后，该衣服下所有 SN 扫码返回停用状态。
 - 批次停用后，该批次下所有 SN 扫码返回停用状态。
@@ -300,84 +377,60 @@ CP20260615DEMO01
 
 生产环境建议优先停用，谨慎真删除。
 
-## 待办事项（TODO）
+## 文档地图
 
-### 用户系统与防丢功能
+| 文档 | 用途 |
+|------|------|
+| [memory/current-system-state.md](memory/current-system-state.md) | 当前真实功能、架构和限制索引 |
+| [memory/operations-handbook.md](memory/operations-handbook.md) | 交付、运营、后台使用和故障处理手册 |
+| [memory/security-principles.md](memory/security-principles.md) | 客户端零信任和隐私边界 |
+| [memory/detailed-logic-design.md](memory/detailed-logic-design.md) | 用户系统和防丢功能的历史设计稿 |
+| [memory/implementation-plan-updated.md](memory/implementation-plan-updated.md) | 历史实施计划与后续路线参考 |
+| [CODE_REVIEW_REPORT.md](CODE_REVIEW_REPORT.md) | 深度代码审查报告 |
 
-**安全原则：客户端零信任** — 所有安全验证必须在服务端完成，不信任任何来自客户端的输入或声明。详见 [memory/security-principles.md](memory/security-principles.md)。
-
-当前系统缺少用户登录和完整的防丢失功能，计划实施以下改进：
-
-#### 阶段 1：基础用户系统（1-2 周）
-- [ ] 创建 `users` 表（微信 openid、昵称、头像、手机号）
-- [ ] 实现微信登录 API (`POST /api/auth/wechat/login`)
-- [ ] 实现用户 Token 验证中间件（与 admin token 分离）
-- [ ] 前端微信登录流程（wx.login 授权）
-- [ ] 环境变量配置（`WECHAT_APP_ID`、`WECHAT_APP_SECRET`、`USER_TOKEN_SECRET`）
-
-#### 阶段 2：绑定鉴权（1 周）
-- [ ] 修改 `garments` 表添加 `bound_by_user_id` 字段
-- [ ] 创建 `binding_logs` 表（审计绑定操作）
-- [ ] 修改绑定 API 增加登录鉴权
-- [ ] 实现解绑 API（只有绑定者可解绑）
-- [ ] 实现修改绑定信息 API
-- [ ] 前端登录状态检查和登录跳转
-
-#### 阶段 3：防丢功能（1-2 周）
-- [ ] 创建 `lost_reports` 表
-- [ ] 修改 `garments` 表添加 `lost_report_id` 字段
-- [ ] 实现报告丢失 API (`POST /api/garments/{sn}/report-lost`)
-- [ ] 实现取消报失 API (`DELETE /api/garments/{sn}/report-lost`)
-- [ ] 修改查询 API，丢失时返回完整联系方式
-- [ ] 实现联系方式曝光统计 (`POST /api/garments/{sn}/contact-reveal`)
-- [ ] 前端报告丢失流程和"查看联系方式"弹窗
-
-#### 阶段 4：用户中心（1 周）
-- [ ] 实现我的衣服 API (`GET /api/user/garments`)
-- [ ] 实现我的丢失报告 API (`GET /api/user/lost-reports`)
-- [ ] 实现绑定历史 API (`GET /api/user/binding-logs`)
-- [ ] 前端用户中心页面（我的衣服、我的报告）
-- [ ] 前端底部 TabBar 导航
-
-#### 阶段 5：完善与优化（1 周）
-- [ ] IP 和 SN 限流（防刷）
-- [ ] 数据脱敏策略完善（正常/丢失/管理员三种模式）
-- [ ] 并发绑定处理（事务 + 乐观锁）
-- [ ] 恶意报告丢失防护（30 天自动过期）
-- [ ] 用户封禁机制
-- [ ] 完整的单元测试和集成测试
-
-**详细设计文档**：参见 [memory/detailed-logic-design.md](memory/detailed-logic-design.md)
-
----
-
-## 测试
+## 测试与验证
 
 ```bash
 npm test
+node --test client/test/fixed-header-layout.test.js
+node --test server/admin/test/admin-ui.test.js
+npm --prefix client run build:mp-weixin
+npm --prefix server/admin run build
 ```
 
 测试覆盖：
 
-- 登录鉴权和 token。
+- 管理员登录、用户登录、token 和鉴权。
 - 衣服、批次、SN 的增删改查。
-- 用户公开查询和查询次数。
-- 绑定、解绑和后台私密字段。
-- 软删除、真删除和旧数据迁移。
-- 后端托管管理台的静态文件、SPA fallback 和路径安全。
+- 用户绑定、修改绑定、解绑、用户中心和绑定日志。
+- 报失、取消报失、联系方式披露和曝光统计。
+- 用户管理、统计、CSV 导出。
+- 二维码生成、历史小程序码请求回退。
+- 后端托管管理台、SPA fallback 和路径安全。
+- 小程序自定义顶部栏、右上角胶囊避让和用户中心按钮布局。
 
 ## 部署建议
 
-1. 设置 `server/.env` 中的 `TOKEN_SECRET` 和 `ADMIN_PASSWORD`。
-2. 把 `FRONTEND_BASE_URL` 配成用户端正式地址。
-3. 启动后端：
+1. 固定设置 `TOKEN_SECRET`、`USER_TOKEN_SECRET` 和 `ADMIN_PASSWORD`。
+2. 设置 `FRONTEND_BASE_URL` 为用户端正式地址。
+3. 设置 `CORS_ORIGIN` 为正式用户端域名，不建议生产长期使用 `*`。
+4. 配置 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`。
+5. 启动后端：
 
 ```bash
 npm start
 ```
 
-4. 访问 `http://你的后端域名/admin/` 管理数据。
-5. 将用户端 H5 或微信小程序单独发布。二维码里的详情链接由 `FRONTEND_BASE_URL` 决定。
+6. 访问 `http://你的后端域名/admin/` 管理数据。
+7. 将用户端 H5 或微信小程序单独发布。
+8. 印刷前用真实环境扫码确认二维码能进入详情页并解析 SN。
+
+## 已知限制
+
+- 当前数据规模按小型校服项目设计，SQLite 足够承载三所学校级别的数据；更大规模上线前应补充备份、监控和限流。
+- 用户手机号由绑定表单手动录入，不做微信手机号解密和短信验证。
+- 报失默认有 30 天过期策略，运营侧仍需制定线下找回和客服流程。
+- 小程序真机环境不能访问电脑的 `localhost`，需要局域网 IP 或 HTTPS 域名。
 
 ## 许可证
 

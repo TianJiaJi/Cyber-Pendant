@@ -7,6 +7,8 @@ metadata:
 
 # Cyber-Pendant 详细逻辑设计
 
+> 文档状态：历史详细设计稿。用户表、绑定日志、丢失报告、用户 token、用户中心和后台用户管理等核心方向已经落地，但字段、接口细节和产品取舍以当前源码为准。当前事实索引见 [current-system-state.md](current-system-state.md)。
+
 ## 一、用户体系设计
 
 ### 1.1 用户表结构

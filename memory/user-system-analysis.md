@@ -7,6 +7,8 @@ metadata:
 
 # Cyber-Pendant 用户系统与防丢功能分析报告
 
+> 文档状态：历史分析稿。本文写于用户系统、防丢功能和用户中心落地之前，保留用于理解当时的问题判断和设计动机。当前实现状态请优先阅读 [current-system-state.md](current-system-state.md) 和 [operations-handbook.md](operations-handbook.md)。
+
 ## 一、当前系统现状
 
 ### 1.1 用户系统设计

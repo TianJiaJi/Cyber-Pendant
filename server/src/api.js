@@ -1,6 +1,7 @@
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
+import archiver from 'archiver';
 import QRCode from 'qrcode';
 import {
   code2Openid,
@@ -1193,6 +1194,141 @@ async function handleQrCode(req, res, context, sn, searchParams) {
   res.end(png);
 }
 
+async function handleBatchQrCodes(req, res, context, searchParams) {
+  requireAdmin(req, context.config);
+
+  const batchId = readPositiveInteger(searchParams.get('batchId'));
+  const type = normalizeQrType(searchParams.get('type')) || 'url';
+
+  if (!batchId) {
+    throw new HttpError(400, '缺少批次ID');
+  }
+
+  const batch = findBatchById(context.db, batchId);
+  if (!batch) {
+    throw new HttpError(404, '未找到该批次');
+  }
+
+  const garments = listGarmentsByBatchId(context.db, batchId);
+  if (!garments || garments.length === 0) {
+    throw new HttpError(404, '该批次没有吊牌');
+  }
+
+  // 检查微信小程序码配置
+  const hasValidWechatConfig =
+    context.config.wechatAppId &&
+    context.config.wechatAppSecret &&
+    typeof context.config.wechatAppId === 'string' &&
+    typeof context.config.wechatAppSecret === 'string' &&
+    context.config.wechatAppId.trim() !== '' &&
+    context.config.wechatAppSecret.trim() !== '';
+
+  if (type === 'mini-program' && !hasValidWechatConfig) {
+    throw new HttpError(400, '微信小程序配置缺失，无法生成小程序码');
+  }
+
+  // 创建ZIP流
+  const zip = archiver('zip', { zlib: { level: 9 } });
+  const zipFileName = `batch-${batchId}-qrcodes-${type}.zip`;
+
+  // 设置响应头
+  setCorsHeaders(req, res, context.config);
+  res.writeHead(200, {
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(zipFileName)}"`
+  });
+
+  // 将ZIP输出流连接到响应
+  zip.pipe(res);
+
+  // 错误处理
+  zip.on('error', (err) => {
+    console.error('ZIP creation error:', err);
+    if (!res.headersSent) {
+      sendJson(req, res, context.config, 500, { message: 'ZIP文件生成失败' });
+    }
+  });
+
+  try {
+    // 获取access_token（如果需要生成小程序码）
+    let accessToken = null;
+    if (type === 'mini-program') {
+      try {
+        if (context.config.wechatAccessTokenProvider) {
+          const tokenResult = await context.config.wechatAccessTokenProvider();
+          accessToken = tokenResult.accessToken;
+        } else {
+          const tokenResult = await getWechatAccessToken(
+            context.config.wechatAppId,
+            context.config.wechatAppSecret,
+            fetch
+          );
+          accessToken = tokenResult.accessToken;
+        }
+      } catch (error) {
+        throw new HttpError(502, '获取微信access_token失败');
+      }
+    }
+
+    // 逐个生成二维码并添加到ZIP
+    for (const garment of garments) {
+      const sn = garment.sn;
+      let qrBuffer;
+
+      if (type === 'mini-program') {
+        try {
+          const qrResult = await getWechatUnlimitedQRCode(
+            {
+              accessToken,
+              scene: sn,
+              page: context.config.wechatQrPage || 'pages/garment/detail',
+              checkPath: context.config.wechatQrCheckPath || false,
+              envVersion: context.config.wechatQrEnvVersion || 'release',
+              width: context.config.wechatQrWidth || 430
+            },
+            fetch
+          );
+          qrBuffer = qrResult.buffer;
+        } catch (error) {
+          console.error(`Failed to generate mini-program QR for ${sn}:`, error.message);
+          // 回退到传统二维码
+          const fallbackUrl = detailUrl(context.config, sn);
+          qrBuffer = await QRCode.toBuffer(fallbackUrl, {
+            type: 'png',
+            width: 512,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: { dark: '#161616', light: '#ffffff' }
+          });
+        }
+      } else {
+        // 传统二维码（SN 或 URL）
+        const content = type === 'sn' ? sn : detailUrl(context.config, sn);
+        qrBuffer = await QRCode.toBuffer(content, {
+          type: 'png',
+          width: 512,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#161616', light: '#ffffff' }
+        });
+      }
+
+      // 添加到ZIP
+      zip.append(qrBuffer, { name: `${sn}.png` });
+    }
+
+    // 完成ZIP
+    zip.finalize();
+  } catch (error) {
+    console.error('Batch QR code generation error:', error);
+    if (!res.headersSent) {
+      sendJson(req, res, context.config, 500, { message: error.message || '批量生成二维码失败' });
+    } else {
+      res.destroy();
+    }
+  }
+}
+
 async function route(req, res, context) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const { pathname, searchParams } = url;
@@ -1410,6 +1546,11 @@ async function route(req, res, context) {
 
   if (garmentSn && req.method === 'DELETE') {
     handleDeleteGarment(req, res, context, garmentSn, searchParams);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/qrcode/batch') {
+    await handleBatchQrCodes(req, res, context, searchParams);
     return;
   }
 

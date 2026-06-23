@@ -414,6 +414,7 @@ import {
   deleteBatch,
   deleteClothing,
   deleteGarment,
+  downloadBatchQrCodes,
   getClothing,
   getQrcodeMode,
   listClothingBatches,
@@ -1047,12 +1048,17 @@ function chooseExportFormat(batch) {
     return;
   }
 
-  const choice = window.prompt('导出格式：输入 1 下载 Excel 表格，输入 2 下载 CSV 清单。', '1');
+  const choice = window.prompt(
+    '导出格式：\n输入 1 下载 Excel 表格\n输入 2 下载 CSV 清单\n输入 3 批量下载二维码（ZIP文件）',
+    '1'
+  );
 
   if (choice === '1') {
     exportExcel(batch);
   } else if (choice === '2') {
     exportCsv(batch);
+  } else if (choice === '3') {
+    downloadBatchQrCodesImpl(batch);
   }
 }
 
@@ -1150,6 +1156,48 @@ function downloadBlob(blob, filename) {
   link.click();
   URL.revokeObjectURL(link.href);
   link.remove();
+}
+
+async function downloadBatchQrCodesImpl(batch) {
+  if (!batch.garments?.length) {
+    batchMessage.value = '该批次暂无 SN 可下载。';
+    return;
+  }
+
+  const count = batch.garments.length;
+  const type = qrMode.value;
+
+  // 如果是小程序码，需要警告用户
+  if (type === QRCODE_MODE_MINIPROGRAM) {
+    const confirmed = window.confirm(
+      `即将生成 ${count} 个微信小程序码，这可能需要 1-2 分钟。\n\n` +
+      `微信API限制：5000次/分钟\n` +
+      `当前批次SN数量：${count}\n\n` +
+      `是否继续？`
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  batchMessage.value = `正在生成 ${count} 个二维码，请稍候...`;
+
+  try {
+    await downloadBatchQrCodes(batch.id, type);
+    batchMessage.value = `成功下载 ${count} 个二维码！`;
+    setTimeout(() => {
+      batchMessage.value = '';
+    }, 3000);
+  } catch (error) {
+    console.error('Failed to download batch QR codes:', error);
+    if (error.statusCode === 400) {
+      batchMessage.value = `生成失败：${error.message}。请检查微信配置或使用传统二维码模式。`;
+    } else if (error.statusCode === 502) {
+      batchMessage.value = `生成失败：微信API调用失败。请稍后重试或使用传统二维码模式。`;
+    } else {
+      batchMessage.value = `下载失败：${error.message || '未知错误'}`;
+    }
+  }
 }
 
 function openDetail(sn) {

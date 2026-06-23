@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "cyber-pendant": "file:..",
     "qrcode": "latest"
   },

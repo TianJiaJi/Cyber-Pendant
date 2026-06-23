@@ -238,3 +238,39 @@ export function publicGarmentDetailUrl(sn) {
 export function qrcodeUrl(sn, type = QRCODE_MODE_URL) {
   return `${absoluteApiBaseUrl()}/api/qrcode/${encodeURIComponent(sn)}?type=${encodeURIComponent(type)}`;
 }
+
+export async function downloadBatchQrCodes(batchId, type = QRCODE_MODE_URL) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const params = new URLSearchParams({ batchId: String(batchId), type });
+  const response = await fetch(`${API_BASE_URL}/api/qrcode/batch?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw {
+      statusCode: response.status,
+      message: error || '下载失败'
+    };
+  }
+
+  // 从响应头获取文件名
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = `batch-${batchId}-qrcodes.zip`;
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    if (match && match[1]) {
+      filename = decodeURIComponent(match[1].replace(/['"]/g, ''));
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

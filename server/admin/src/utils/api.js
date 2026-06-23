@@ -11,6 +11,8 @@ export const FRONTEND_BASE_URL =
 const TOKEN_KEY = 'cyber_pendant_admin_token';
 export const QRCODE_MODE_KEY = 'cyber_pendant_qrcode_mode';
 export const QRCODE_MODE_URL = 'url';
+export const QRCODE_MODE_MINIPROGRAM = 'mini-program';
+export const QRCODE_MODE_SN = 'sn';
 
 function absoluteApiBaseUrl() {
   if (API_BASE_URL) {
@@ -77,11 +79,18 @@ export function clearToken() {
 }
 
 export function getQrcodeMode() {
+  const saved = localStorage.getItem(QRCODE_MODE_KEY);
+  if (saved && (saved === QRCODE_MODE_URL || saved === QRCODE_MODE_MINIPROGRAM || saved === QRCODE_MODE_SN)) {
+    return saved;
+  }
   return QRCODE_MODE_URL;
 }
 
-export function saveQrcodeMode() {
-  localStorage.setItem(QRCODE_MODE_KEY, QRCODE_MODE_URL);
+export function saveQrcodeMode(mode) {
+  if (mode === QRCODE_MODE_URL || mode === QRCODE_MODE_MINIPROGRAM || mode === QRCODE_MODE_SN) {
+    localStorage.setItem(QRCODE_MODE_KEY, mode);
+    return mode;
+  }
   return QRCODE_MODE_URL;
 }
 

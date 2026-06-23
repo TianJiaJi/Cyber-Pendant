@@ -302,6 +302,8 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
 test('legacy mini-program QR requests fall back to square link QR codes', async (t) => {
   const miniProgramCodeCalls = [];
   const app = await startTestServer({
+    wechatAppId: '',
+    wechatAppSecret: '',
     wechatAccessTokenProvider: async () => ({
       accessToken: 'ACCESS_TOKEN_FOR_TEST',
       expiresIn: 7200

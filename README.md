@@ -117,20 +117,30 @@ client/dist/build/mp-weixin
 
 ## 二维码策略
 
-系统当前统一使用传统正方形二维码：
+系统支持两种二维码类型：
+
+### 1. 传统正方形二维码（默认）
 
 - 二维码接口：`GET /api/qrcode/{sn}?type=url`
 - 二维码内容：`FRONTEND_BASE_URL/#/pages/garment/detail?sn={SN}`
-- 管理台导出：使用详情页链接和二维码图片链接，不再导出微信小程序码 `scene` 字段。
-- 兼容处理：历史请求 `type=mini-program` 会回落为普通链接二维码。
+- 适用于任何扫码工具
+- 微信扫一扫会打开浏览器/H5 页面
+
+### 2. 微信小程序码（可选）
+
+- 二维码接口：`GET /api/qrcode/{sn}?type=mini-program`
+- 调用微信 `getwxacodeunlimit` API 生成
+- Scene 参数传递 SN 值
+- 微信扫一扫直接打开小程序指定页面
+- 需要配置：`WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`
 
 扫码解析支持以下输入：
 
 ```text
-https://example.com/#/pages/garment/detail?sn=CP20260615DEMO01
-pages/garment/detail?scene=CP20260615DEMO01
-scene=sn%3DCP20260615DEMO01
-CP20260615DEMO01
+https://example.com/#/pages/garment/detail?sn=CP20260615DEMO01  # 传统二维码链接
+pages/garment/detail?scene=CP20260615DEMO01                       # 小程序码跳转
+scene=sn%3DCP20260615DEMO01                                       # 编码 scene
+CP20260615DEMO01                                                   # 直接 SN
 ```
 
 ## 项目结构
@@ -269,12 +279,14 @@ node --test server/admin/test/admin-ui.test.js
 | `TOKEN_SECRET` | 随机临时值 | 管理员 token 签名密钥，生产必须固定配置 |
 | `USER_TOKEN_SECRET` | 同 `TOKEN_SECRET` | 用户 token 签名密钥，生产建议单独配置 |
 | `USER_TOKEN_TTL_DAYS` | `30` | 用户 token 有效天数 |
-| `WECHAT_APP_ID` | 空 | 微信小程序 AppID |
-| `WECHAT_APP_SECRET` | 空 | 微信小程序 AppSecret |
+| `WECHAT_APP_ID` | 空 | 微信小程序 AppID（小程序码生成必需） |
+| `WECHAT_APP_SECRET` | 空 | 微信小程序 AppSecret（小程序码生成必需） |
+| `WECHAT_QR_PAGE` | `pages/garment/detail` | 小程序码跳转页面路径 |
+| `WECHAT_QR_ENV_VERSION` | `release` | 小程序码环境版本（release/trial/develop） |
+| `WECHAT_QR_CHECK_PATH` | `false` | 小程序码是否检查页面存在 |
+| `WECHAT_QR_WIDTH` | `430` | 小程序码宽度 |
 | `ADMIN_USERNAME` | `admin` | 默认管理员用户名 |
 | `ADMIN_PASSWORD` | 空 | 默认管理员密码，必须设置 |
-
-历史小程序码配置项（`WECHAT_QR_*`）仍可出现在 `.env.example` 中，但当前二维码策略不再调用微信小程序码接口。
 
 ### 用户端
 
@@ -330,7 +342,12 @@ node --test server/admin/test/admin-ui.test.js
 | `DELETE` | `/api/garments/{sn}/report-lost` | 取消报失 | 用户本人 / 管理员 |
 | `POST` | `/api/garments/{sn}/contact-reveal` | 披露联系方式并记录曝光 | 用户 |
 | `POST` | `/api/sn/generate` | 生成唯一 SN | 管理员 |
-| `GET` | `/api/qrcode/{sn}?type=sn\|url` | 获取二维码图片 | 否 |
+| `GET` | `/api/qrcode/{sn}?type=sn\|url\|mini-program` | 获取二维码图片 | 否 |
+
+二维码类型说明：
+- `type=sn`：原始 SN 码二维码
+- `type=url`：详情页链接二维码（默认）
+- `type=mini-program`：微信小程序码，微信扫码直接进入小程序
 
 `/api/admin/export/{type}` 支持：
 

@@ -418,6 +418,9 @@ import {
   getQrcodeMode,
   listClothingBatches,
   publicGarmentDetailUrl,
+  QRCODE_MODE_MINIPROGRAM,
+  QRCODE_MODE_SN,
+  QRCODE_MODE_URL,
   qrcodeUrl,
   saveQrcodeMode,
   unbindGarmentBinding as unbindGarmentBindingApi,
@@ -529,19 +532,37 @@ const clothingInfoRows = computed(() => [
 
 const qrModeOptions = [
   {
-    value: 'url',
+    value: QRCODE_MODE_URL,
     label: '传统正方形二维码',
     description: '用于正式印刷，二维码内容为详情页链接，小程序内扫码会自动提取 SN。'
+  },
+  {
+    value: QRCODE_MODE_MINIPROGRAM,
+    label: '微信小程序码',
+    description: '微信扫码直接进入小程序，需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。'
+  },
+  {
+    value: QRCODE_MODE_SN,
+    label: '原始 SN 码',
+    description: '二维码内容仅为 SN 文本，适合内部扫描设备使用。'
   }
 ];
 
-const qrModeLabel = computed(() =>
-  '传统正方形二维码'
-);
+const qrModeLabel = computed(() => {
+  const mode = qrModeOptions.find(o => o.value === qrMode.value);
+  return mode?.label || '传统正方形二维码';
+});
 
-const qrModeHelp = computed(() =>
-  '当前导出会生成传统正方形二维码，扫码内容为详情页链接；小程序内扫描会从链接中提取 SN。'
-);
+const qrModeHelp = computed(() => {
+  switch (qrMode.value) {
+    case QRCODE_MODE_MINIPROGRAM:
+      return '当前导出生成微信小程序码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。';
+    case QRCODE_MODE_SN:
+      return '当前导出生成原始 SN 码二维码，内容仅为 SN 文本。';
+    default:
+      return '当前导出会生成传统正方形二维码，扫码内容为详情页链接；小程序内扫描会从链接中提取 SN。';
+  }
+});
 
 onMounted(() => {
   clothingId.value = String(route.params.id || '').trim();

@@ -70,7 +70,6 @@ Important boundaries:
 - User-only APIs must call `requireUser` and authorize against database ownership.
 - Public lookup must not return full contact details unless the dedicated contact reveal flow allows it.
 - User token and admin token are separate token types.
-- QR generation is traditional square QR only; do not reintroduce WeChat round mini-program code generation without an explicit product decision.
 
 ### Client
 
@@ -110,14 +109,29 @@ Routes:
 
 ## QR Code Policy
 
-The product now uses traditional square QR codes.
+The product supports two QR code types:
 
-- Default QR URL: `/api/qrcode/{sn}?type=url`.
-- QR payload: `${FRONTEND_BASE_URL}/#/pages/garment/detail?sn={SN}`.
-- `type=sn` is still supported for raw-SN QR payloads.
-- Legacy `type=mini-program` falls back to square link QR.
-- Admin exports should describe QR codes as traditional square QR codes.
-- Mini Program scanning must parse SN from links, direct `sn`, direct `scene`, and encoded scene payloads.
+1. **Traditional Square QR Codes** (default)
+   - URL: `/api/qrcode/{sn}?type=url`
+   - Payload: `${FRONTEND_BASE_URL}/#/pages/garment/detail?sn={SN}`
+   - Compatible with any QR scanner
+   - WeChat scan opens browser/H5 page
+
+2. **WeChat Mini-Program Codes** (optional)
+   - URL: `/api/qrcode/{sn}?type=mini-program`
+   - Calls WeChat `getwxacodeunlimit` API
+   - Scene parameter: SN value
+   - WeChat scan opens mini-program directly at `pages/garment/detail`
+   - Requires: `WECHAT_APP_ID` and `WECHAT_APP_SECRET`
+
+Additional types:
+- `type=sn`: Raw SN payload for direct scanning
+
+Mini Program scanning parses SN from:
+- Link URL parameters (`sn=`)
+- Scene parameter (`scene=` passed by mini-program code)
+- Direct SN text
+- Encoded scene payloads
 
 Regression tests:
 

@@ -340,6 +340,12 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(18rpx);
 }
 
+/* #ifdef MP-WEIXIN */
+.home-topbar {
+  padding-right: 224rpx;
+}
+/* #endif */
+
 .brand-block {
   min-width: 0;
 }

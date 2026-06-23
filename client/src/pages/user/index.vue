@@ -7,7 +7,7 @@
           <text class="brand-subtitle">绑定与寻物记录</text>
         </view>
         <button v-if="loggedIn" class="ghost-button" hover-class="ghost-button-hover" @click="() => logout()">
-          退出
+          <text class="button-label">退出</text>
         </button>
       </view>
 
@@ -16,7 +16,7 @@
           <text class="empty-title">登录后查看你的校服</text>
           <text class="empty-copy">绑定、报失和取消报失都会归属到当前微信用户。</text>
           <button class="primary-button" hover-class="primary-button-hover" @click="() => goLogin()">
-            微信登录
+            <text class="button-label">微信登录</text>
           </button>
         </view>
 
@@ -38,7 +38,7 @@
             <view class="section-heading">
               <text class="section-title">我的校服</text>
               <button class="refresh-button" hover-class="refresh-button-hover" @click="() => loadUserData()">
-                刷新
+                <text class="button-label">刷新</text>
               </button>
             </view>
 
@@ -251,6 +251,12 @@ function formatDate(value) {
   backdrop-filter: blur(18rpx);
 }
 
+/* #ifdef MP-WEIXIN */
+.user-topbar {
+  padding-right: 224rpx;
+}
+/* #endif */
+
 .brand-block,
 .brand-mark,
 .brand-subtitle {
@@ -290,6 +296,9 @@ function formatDate(value) {
 
 .ghost-button,
 .refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 62rpx;
   padding: 0 24rpx;
   border: 1px solid rgba(213, 202, 185, 0.9);
@@ -298,6 +307,11 @@ function formatDate(value) {
   color: #36312a;
   font-size: 24rpx;
   font-weight: 680;
+}
+
+.button-label {
+  display: block;
+  line-height: 1;
 }
 
 .ghost-button-hover,

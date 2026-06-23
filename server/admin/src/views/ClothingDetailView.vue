@@ -482,10 +482,8 @@ const exportColumns = [
   { key: 'sn', label: 'SN' },
   { key: 'batchNo', label: '批次标签' },
   { key: 'productionDate', label: '生产日期' },
-  { key: 'detailUrl', label: '详情页/小程序入口' },
+  { key: 'detailUrl', label: '详情页链接' },
   { key: 'qrModeLabel', label: '二维码模式' },
-  { key: 'miniProgramPage', label: '小程序页面' },
-  { key: 'miniProgramScene', label: '小程序 scene' },
   { key: 'qrUrl', label: '二维码图片链接' }
 ];
 
@@ -531,25 +529,18 @@ const clothingInfoRows = computed(() => [
 
 const qrModeOptions = [
   {
-    value: 'mini-program',
-    label: '小程序码',
-    description: '推荐正式印刷，扫码进入 pages/garment/detail，scene=SN。'
-  },
-  {
     value: 'url',
-    label: 'H5 链接码',
-    description: '用于浏览器预览和本地联调，会生成前台详情页 URL。'
+    label: '传统正方形二维码',
+    description: '用于正式印刷，二维码内容为详情页链接，小程序内扫码会自动提取 SN。'
   }
 ];
 
 const qrModeLabel = computed(() =>
-  qrMode.value === 'mini-program' ? '小程序码' : 'H5 链接码'
+  '传统正方形二维码'
 );
 
 const qrModeHelp = computed(() =>
-  qrMode.value === 'mini-program'
-    ? '当前导出会写入小程序页面 pages/garment/detail 与 scene=SN，并下载微信小程序码图片。'
-    : '当前导出会写入 H5 详情页链接，并下载普通链接二维码。'
+  '当前导出会生成传统正方形二维码，扫码内容为详情页链接；小程序内扫描会从链接中提取 SN。'
 );
 
 onMounted(() => {
@@ -1056,8 +1047,6 @@ function getExportRows(batch) {
     productionDate: batch.productionDate || record.productionDate || '',
     detailUrl: detailPageUrl(record.sn),
     qrModeLabel: qrModeLabel.value,
-    miniProgramPage: qrMode.value === 'mini-program' ? 'pages/garment/detail' : '',
-    miniProgramScene: qrMode.value === 'mini-program' ? `scene=${record.sn}` : '',
     qrUrl: qrcodeUrl(record.sn, qrMode.value)
   }));
 }
@@ -1088,8 +1077,6 @@ function exportExcel(batch) {
     { wch: 14 },
     { wch: 36 },
     { wch: 14 },
-    { wch: 24 },
-    { wch: 26 },
     { wch: 52 }
   ];
   const workbook = XLSX.utils.book_new();
@@ -1109,10 +1096,6 @@ function csvCell(value) {
 }
 
 function detailPageUrl(sn) {
-  if (qrMode.value === 'mini-program') {
-    return `pages/garment/detail scene=${sn}`;
-  }
-
   return publicGarmentDetailUrl(sn);
 }
 

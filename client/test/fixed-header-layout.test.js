@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { extractSnFromScan } from '../src/utils/scanner.js';
 
 const clientRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -136,4 +137,50 @@ test('login, user center, and authenticated user APIs are wired into the client'
   assert.match(userFile, /getUserLostReports/, 'user center should load lost reports');
   assert.match(userFile, /clearUserSession/, 'user center should clear login state on logout');
   assert.match(userFile, /reLaunch/, 'logout should reset the user page state after clearing login');
+});
+
+test('scanner extracts SN from square QR links and mini-program scene payloads', () => {
+  assert.equal(
+    extractSnFromScan('https://example.com/#/pages/garment/detail?sn=cp20260615demo01'),
+    'CP20260615DEMO01'
+  );
+  assert.equal(
+    extractSnFromScan('pages/garment/detail?scene=CP20260615DEMO01'),
+    'CP20260615DEMO01'
+  );
+  assert.equal(
+    extractSnFromScan('scene=sn%3DCP20260615DEMO01'),
+    'CP20260615DEMO01'
+  );
+});
+
+test('mini-program topbars reserve the WeChat capsule area', () => {
+  const pages = [
+    ['src/pages/index/index.vue', '.home-topbar'],
+    ['src/pages/login/index.vue', '.login-topbar'],
+    ['src/pages/garment/detail.vue', '.detail-topbar'],
+    ['src/pages/user/index.vue', '.user-topbar']
+  ];
+
+  for (const [relativePath, selector] of pages) {
+    const file = readVueFile(relativePath);
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const miniProgramBlock = new RegExp(
+      `/\\* #ifdef MP-WEIXIN \\*/[\\s\\S]*?${escapedSelector}\\s*\\{[\\s\\S]*?padding-right:\\s*224rpx;`
+    );
+    assert.match(file, miniProgramBlock, `${selector} should leave room for the WeChat capsule`);
+  }
+});
+
+test('user center button labels are explicitly centered', () => {
+  const userFile = readVueFile('src/pages/user/index.vue');
+  const userStyle = baseCss(readVueStyle('src/pages/user/index.vue'));
+
+  assert.match(userFile, /class="button-label"[\s\S]*?退出/, 'logout button should wrap text in a centered label');
+  assert.match(userFile, /class="button-label"[\s\S]*?微信登录/, 'login button should wrap text in a centered label');
+  assert.match(userFile, /class="button-label"[\s\S]*?刷新/, 'refresh button should wrap text in a centered label');
+  assertDeclarations(block(userStyle, '.button-label'), '.button-label', [
+    /display:\s*block;/,
+    /line-height:\s*1;/
+  ]);
 });

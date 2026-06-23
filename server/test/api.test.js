@@ -299,7 +299,7 @@ test('auth, legacy single create, duplicate SN, public lookup, QR code, and SN d
   assert.equal(missingLookup.status, 404);
 });
 
-test('mini-program QR code generation uses WeChat scene and page', async (t) => {
+test('legacy mini-program QR requests fall back to square link QR codes', async (t) => {
   const miniProgramCodeCalls = [];
   const app = await startTestServer({
     wechatAccessTokenProvider: async () => ({
@@ -326,16 +326,9 @@ test('mini-program QR code generation uses WeChat scene and page', async (t) => 
   const qr = await fetch(`${app.baseUrl}/api/qrcode/${sn}?type=mini-program`);
   assert.equal(qr.status, 200);
   assert.equal(qr.headers.get('content-type'), 'image/png');
-  assert.equal(Buffer.from(await qr.arrayBuffer()).toString(), 'fake-mini-program-code-image');
-  assert.equal(miniProgramCodeCalls.length, 1);
-  assert.deepEqual(miniProgramCodeCalls[0], {
-    accessToken: 'ACCESS_TOKEN_FOR_TEST',
-    scene: sn,
-    page: 'pages/garment/detail',
-    checkPath: false,
-    envVersion: 'release',
-    width: 430
-  });
+  const buffer = Buffer.from(await qr.arrayBuffer());
+  assert.equal(buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(miniProgramCodeCalls.length, 0);
 });
 
 test('wechat login, user-owned binding, lost report, contact reveal, and user center APIs', async (t) => {

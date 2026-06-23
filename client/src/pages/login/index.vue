@@ -151,6 +151,13 @@ async function handleLogin() {
   backdrop-filter: blur(18rpx);
 }
 
+/* #ifdef MP-WEIXIN */
+.login-topbar {
+  padding-right: 224rpx;
+  grid-template-columns: 128rpx minmax(0, 1fr) 224rpx;
+}
+/* #endif */
+
 .nav-button,
 .login-button {
   margin: 0;

@@ -6,8 +6,6 @@ import {
   code2Openid,
   createToken,
   createUserToken,
-  getWechatAccessToken,
-  getWechatUnlimitedQRCode,
   verifyPassword,
   verifyToken
 } from './auth.js';
@@ -177,51 +175,7 @@ function normalizeQrType(value) {
     return 'sn';
   }
 
-  if (value === 'mini-program') {
-    return 'mini-program';
-  }
-
   return 'url';
-}
-
-async function resolveWechatAccessToken(context) {
-  const cached = context.wechatAccessTokenCache;
-  if (cached?.accessToken && cached.expiresAt > Date.now()) {
-    return cached.accessToken;
-  }
-
-  const provider = context.config.wechatAccessTokenProvider || (async () =>
-    getWechatAccessToken(context.config.wechatAppId, context.config.wechatAppSecret));
-  const result = await provider(context.config.wechatAppId, context.config.wechatAppSecret);
-  const accessToken =
-    typeof result === 'string' ? result : result?.accessToken || result?.access_token || '';
-
-  if (!accessToken) {
-    throw new HttpError(502, '微信 access_token 响应无效');
-  }
-
-  const expiresIn = Number(result?.expiresIn || result?.expires_in || 7200);
-  context.wechatAccessTokenCache = {
-    accessToken,
-    expiresAt: Date.now() + Math.max(60, expiresIn - 300) * 1000
-  };
-
-  return accessToken;
-}
-
-async function createMiniProgramQrCode(context, sn) {
-  const accessToken = await resolveWechatAccessToken(context);
-  const request = {
-    accessToken,
-    scene: sn,
-    page: context.config.wechatQrPage,
-    checkPath: context.config.wechatQrCheckPath,
-    envVersion: context.config.wechatQrEnvVersion,
-    width: context.config.wechatQrWidth
-  };
-  const provider = context.config.wechatMiniProgramCodeProvider || getWechatUnlimitedQRCode;
-
-  return provider(request);
 }
 
 function parsePathSn(pathname, prefix) {
@@ -1134,17 +1088,6 @@ async function handleQrCode(req, res, context, sn, searchParams) {
   }
 
   const type = normalizeQrType(searchParams.get('type'));
-  if (type === 'mini-program') {
-    const image = await createMiniProgramQrCode(context, sn);
-    setCorsHeaders(req, res, context.config);
-    res.writeHead(200, {
-      'Content-Type': image.contentType || 'image/png',
-      'Cache-Control': 'no-store'
-    });
-    res.end(image.buffer);
-    return;
-  }
-
   const content = type === 'sn' ? sn : detailUrl(context.config, sn);
   const png = await QRCode.toBuffer(content, {
     type: 'png',
@@ -1402,7 +1345,7 @@ export function createApp(options = {}) {
   const config = createConfig(options);
   const db = openDatabase(config.databasePath);
   migrateDatabase(db, config);
-  const context = { config, db, wechatAccessTokenCache: null };
+  const context = { config, db };
   const server = createServer((req, res) => {
     route(req, res, context).catch((error) => {
       const status = error.status || 500;

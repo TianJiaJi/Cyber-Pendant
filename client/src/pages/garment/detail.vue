@@ -840,6 +840,13 @@ async function revealContact() {
   backdrop-filter: blur(18rpx);
 }
 
+/* #ifdef MP-WEIXIN */
+.detail-topbar {
+  padding-right: 224rpx;
+  grid-template-columns: 128rpx minmax(0, 1fr) 224rpx;
+}
+/* #endif */
+
 .nav-button,
 .state-action,
 .company-card,

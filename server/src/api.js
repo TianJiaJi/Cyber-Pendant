@@ -8,6 +8,7 @@ import {
   createToken,
   createUserToken,
   getWechatAccessToken,
+  getWechatQRCode,
   getWechatUnlimitedQRCode,
   verifyPassword,
   verifyToken
@@ -176,6 +177,10 @@ function detailUrl(config, sn) {
 function normalizeQrType(value) {
   if (value === 'sn') {
     return 'sn';
+  }
+
+  if (value === 'mini-program-square' || value === 'miniprogram-square') {
+    return 'mini-program-square';
   }
 
   if (value === 'mini-program' || value === 'miniprogram') {
@@ -1096,7 +1101,7 @@ async function handleQrCode(req, res, context, sn, searchParams) {
 
   const type = normalizeQrType(searchParams.get('type'));
 
-  // 微信小程序码：使用微信API生成
+  // 微信小程序码（圆形）：使用微信API生成
   if (type === 'mini-program') {
     let qrImage;
     let fetchError = null;
@@ -1173,6 +1178,75 @@ async function handleQrCode(req, res, context, sn, searchParams) {
     return;
   }
 
+  // 微信小程序正方形二维码：使用微信API生成
+  if (type === 'mini-program-square') {
+    let qrImage;
+    let fetchError = null;
+
+    const hasValidWechatConfig =
+      context.config.wechatAppId &&
+      context.config.wechatAppSecret &&
+      typeof context.config.wechatAppId === 'string' &&
+      typeof context.config.wechatAppSecret === 'string' &&
+      context.config.wechatAppId.trim() !== '' &&
+      context.config.wechatAppSecret.trim() !== '';
+
+    if (hasValidWechatConfig) {
+      try {
+        let accessToken;
+        if (context.config.wechatAccessTokenProvider) {
+          const tokenResult = await context.config.wechatAccessTokenProvider();
+          accessToken = tokenResult.accessToken;
+        } else {
+          const tokenResult = await getWechatAccessToken(
+            context.config.wechatAppId,
+            context.config.wechatAppSecret,
+            fetch
+          );
+          accessToken = tokenResult.accessToken;
+        }
+
+        const qrFetchImpl = context.config.wechatMiniProgramCodeProvider || fetch;
+        const qrResult = await getWechatQRCode(
+          {
+            accessToken,
+            path: `${context.config.wechatQrPage || 'pages/garment/detail'}?sn=${sn}`,
+            width: context.config.wechatQrWidth || 430
+          },
+          qrFetchImpl
+        );
+        qrImage = qrResult.buffer;
+      } catch (error) {
+        fetchError = error;
+      }
+    } else {
+      fetchError = new Error('微信小程序配置缺失或不完整');
+    }
+
+    if (fetchError || !qrImage) {
+      console.log('Mini-program square QR code generation failed, falling back to traditional QR:', fetchError?.message);
+      const fallbackContent = detailUrl(context.config, sn);
+      qrImage = await QRCode.toBuffer(fallbackContent, {
+        type: 'png',
+        width: 512,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#161616',
+          light: '#ffffff'
+        }
+      });
+    }
+
+    setCorsHeaders(req, res, context.config);
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'no-store'
+    });
+    res.end(qrImage);
+    return;
+  }
+
   // 传统二维码（SN 或 URL）
   const content = type === 'sn' ? sn : detailUrl(context.config, sn);
   const png = await QRCode.toBuffer(content, {
@@ -1223,7 +1297,7 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
     context.config.wechatAppId.trim() !== '' &&
     context.config.wechatAppSecret.trim() !== '';
 
-  if (type === 'mini-program' && !hasValidWechatConfig) {
+  if ((type === 'mini-program' || type === 'mini-program-square') && !hasValidWechatConfig) {
     throw new HttpError(400, '微信小程序配置缺失，无法生成小程序码');
   }
 
@@ -1252,7 +1326,7 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
   try {
     // 获取access_token（如果需要生成小程序码）
     let accessToken = null;
-    if (type === 'mini-program') {
+    if (type === 'mini-program' || type === 'mini-program-square') {
       try {
         if (context.config.wechatAccessTokenProvider) {
           const tokenResult = await context.config.wechatAccessTokenProvider();
@@ -1292,6 +1366,28 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
         } catch (error) {
           console.error(`Failed to generate mini-program QR for ${sn}:`, error.message);
           // 回退到传统二维码
+          const fallbackUrl = detailUrl(context.config, sn);
+          qrBuffer = await QRCode.toBuffer(fallbackUrl, {
+            type: 'png',
+            width: 512,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: { dark: '#161616', light: '#ffffff' }
+          });
+        }
+      } else if (type === 'mini-program-square') {
+        try {
+          const qrResult = await getWechatQRCode(
+            {
+              accessToken,
+              path: `${context.config.wechatQrPage || 'pages/garment/detail'}?sn=${sn}`,
+              width: context.config.wechatQrWidth || 430
+            },
+            fetch
+          );
+          qrBuffer = qrResult.buffer;
+        } catch (error) {
+          console.error(`Failed to generate mini-program square QR for ${sn}:`, error.message);
           const fallbackUrl = detailUrl(context.config, sn);
           qrBuffer = await QRCode.toBuffer(fallbackUrl, {
             type: 'png',

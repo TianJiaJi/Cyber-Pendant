@@ -144,7 +144,7 @@
                 <div class="form-picker date-picker-value">
                   {{ batchForm.productionDate || todayDateString() }}
                 </div>
-                <button class="secondary-button date-picker-button" @click="openDatePicker('create')">
+                <button class="secondary-button date-picker-button" @click="(e) => openDatePicker('create', e)">
                   选择日期
                 </button>
               </div>
@@ -287,7 +287,7 @@
                       <div class="form-picker date-picker-value">
                         {{ batchEditForm.productionDate || todayDateString() }}
                       </div>
-                      <button class="secondary-button date-picker-button" @click="openDatePicker('edit')">
+                      <button class="secondary-button date-picker-button" @click="(e) => openDatePicker('edit', e)">
                         选择日期
                       </button>
                     </div>
@@ -430,6 +430,7 @@ import {
   publicGarmentDetailUrl,
   qrcodeUrl,
   QRCODE_MODE_MINIPROGRAM,
+  QRCODE_MODE_MINIPROGRAM_SQUARE,
   QRCODE_MODE_SN,
   QRCODE_MODE_URL,
   saveQrcodeMode,
@@ -531,13 +532,18 @@ const clothingInfoRows = computed(() => [
 const qrModeOptions = [
   {
     value: QRCODE_MODE_URL,
-    label: '传统正方形二维码',
-    description: '用于正式印刷，二维码内容为详情页链接，小程序内扫码会自动提取 SN。'
+    label: 'H5 链接二维码',
+    description: '普通正方形二维码，内容为 H5 详情页链接，微信扫码打开浏览器。'
+  },
+  {
+    value: QRCODE_MODE_MINIPROGRAM_SQUARE,
+    label: '微信小程序二维码',
+    description: '正方形微信小程序二维码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。'
   },
   {
     value: QRCODE_MODE_MINIPROGRAM,
     label: '微信小程序码',
-    description: '微信扫码直接进入小程序，需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。'
+    description: '圆形微信小程序码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。'
   },
   {
     value: QRCODE_MODE_SN,
@@ -548,17 +554,19 @@ const qrModeOptions = [
 
 const qrModeLabel = computed(() => {
   const mode = qrModeOptions.find(o => o.value === qrMode.value);
-  return mode?.label || '传统正方形二维码';
+  return mode?.label || 'H5 链接二维码';
 });
 
 const qrModeHelp = computed(() => {
   switch (qrMode.value) {
     case QRCODE_MODE_MINIPROGRAM:
-      return '当前导出生成微信小程序码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。';
+      return '当前导出生成圆形微信小程序码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。';
+    case QRCODE_MODE_MINIPROGRAM_SQUARE:
+      return '当前导出生成正方形微信小程序二维码，微信扫码直接进入小程序；需要配置 WECHAT_APP_ID 和 WECHAT_APP_SECRET。';
     case QRCODE_MODE_SN:
       return '当前导出生成原始 SN 码二维码，内容仅为 SN 文本。';
     default:
-      return '当前导出会生成传统正方形二维码，扫码内容为详情页链接；小程序内扫描会从链接中提取 SN。';
+      return '当前导出会生成 H5 链接二维码，扫码内容为详情页链接；微信扫码打开浏览器。';
   }
 });
 
@@ -724,7 +732,7 @@ function normalizeDateValue(value) {
   return normalized;
 }
 
-function openDatePicker(target) {
+function openDatePicker(target, event) {
   const form = target === 'edit' ? batchEditForm : batchForm;
   const fallbackDate = normalizeDateValue(form.productionDate) || todayDateString();
 
@@ -737,13 +745,25 @@ function openDatePicker(target) {
   const input = document.createElement('input');
   input.type = 'date';
   input.value = fallbackDate;
+
+  // 获取按钮位置，在按钮附近显示日历
+  let top = '50%';
+  let left = '50%';
+
+  if (event && event.target) {
+    const rect = event.target.getBoundingClientRect();
+    top = `${rect.bottom + 8}px`;
+    left = `${rect.left}px`;
+  }
+
   input.style.position = 'fixed';
-  input.style.left = '0';
-  input.style.bottom = '0';
-  input.style.width = '1px';
-  input.style.height = '1px';
+  input.style.top = top;
+  input.style.left = left;
+  input.style.width = '280px';
+  input.style.height = '40px';
   input.style.opacity = '0';
-  input.style.pointerEvents = 'none';
+  input.style.pointerEvents = 'auto';
+  input.style.zIndex = '9999';
 
   const removeInput = () => {
     if (input.parentNode) {

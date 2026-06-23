@@ -233,3 +233,57 @@ export async function getWechatUnlimitedQRCode(request, fetchImpl = fetch) {
     buffer
   };
 }
+
+/**
+ * 生成微信小程序正方形二维码
+ * 使用微信 API createwxaqrcode 接口
+ * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/qr-code/wxacode.createWXAQRCode.html
+ */
+export async function getWechatQRCode(request, fetchImpl = fetch) {
+  if (!request?.accessToken) {
+    const error = new Error('微信 access_token 缺失');
+    error.status = 500;
+    throw error;
+  }
+
+  const url = new URL('https://api.weixin.qq.com/cgi-bin/wxaapp/createwxaqrcode');
+  url.searchParams.set('access_token', request.accessToken);
+
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      path: request.path,
+      width: request.width
+    })
+  });
+  const contentType = response.headers.get('content-type') || '';
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (contentType.includes('application/json')) {
+    let result = {};
+    try {
+      result = JSON.parse(buffer.toString('utf8'));
+    } catch {
+      // Keep the generic response error below.
+    }
+
+    const error = new Error(result.errmsg || '微信小程序二维码生成失败');
+    error.status = response.ok ? 502 : response.status;
+    error.details = result.errcode ? { errcode: result.errcode } : undefined;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error('微信小程序二维码生成失败');
+    error.status = response.status;
+    throw error;
+  }
+
+  return {
+    contentType: contentType || 'image/png',
+    buffer
+  };
+}

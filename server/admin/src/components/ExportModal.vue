@@ -101,7 +101,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { checkCacheStatus, getOrDownloadQrCode } from '../utils/qrCache.js';
-import { qrcodeUrl, QRCODE_MODE_URL, QRCODE_MODE_MINIPROGRAM, QRCODE_MODE_SN } from '../utils/api.js';
+import { qrcodeUrl, QRCODE_MODE_URL, QRCODE_MODE_MINIPROGRAM, QRCODE_MODE_MINIPROGRAM_SQUARE, QRCODE_MODE_SN } from '../utils/api.js';
 import ExcelJS from 'exceljs';
 
 const props = defineProps({
@@ -441,10 +441,12 @@ function getQrModeLabel(mode) {
   switch (mode) {
     case QRCODE_MODE_MINIPROGRAM:
       return '微信小程序码';
+    case QRCODE_MODE_MINIPROGRAM_SQUARE:
+      return '微信小程序二维码';
     case QRCODE_MODE_SN:
       return '原始 SN 码';
     default:
-      return '传统正方形二维码';
+      return 'H5 链接二维码';
   }
 }
 

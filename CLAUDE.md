@@ -109,23 +109,32 @@ Routes:
 
 ## QR Code Policy
 
-The product supports two QR code types:
+The product supports four QR code types:
 
-1. **Traditional Square QR Codes** (default)
+1. **H5 Link QR Codes** (default)
    - URL: `/api/qrcode/{sn}?type=url`
    - Payload: `${FRONTEND_BASE_URL}/#/pages/garment/detail?sn={SN}`
-   - Compatible with any QR scanner
+   - Standard square QR code compatible with any scanner
    - WeChat scan opens browser/H5 page
 
-2. **WeChat Mini-Program Codes** (optional)
+2. **WeChat Mini-Program Square QR Codes** (optional)
+   - URL: `/api/qrcode/{sn}?type=mini-program-square`
+   - Calls WeChat `createwxaqrcode` API
+   - Path parameter: `pages/garment/detail?sn={SN}`
+   - Square QR code that opens mini-program directly
+   - Requires: `WECHAT_APP_ID` and `WECHAT_APP_SECRET`
+
+3. **WeChat Mini-Program Codes** (optional)
    - URL: `/api/qrcode/{sn}?type=mini-program`
    - Calls WeChat `getwxacodeunlimit` API
    - Scene parameter: SN value
-   - WeChat scan opens mini-program directly at `pages/garment/detail`
+   - Circular code that opens mini-program directly at `pages/garment/detail`
    - Requires: `WECHAT_APP_ID` and `WECHAT_APP_SECRET`
 
-Additional types:
-- `type=sn`: Raw SN payload for direct scanning
+4. **Raw SN QR Codes**
+   - URL: `/api/qrcode/{sn}?type=sn`
+   - Payload: SN text only
+   - For internal scanning equipment
 
 Mini Program scanning parses SN from:
 - Link URL parameters (`sn=`)

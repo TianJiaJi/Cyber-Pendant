@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import archiver from 'archiver';
 import QRCode from 'qrcode';
+import ExcelJS from 'exceljs';
 import {
   code2Openid,
   createToken,
@@ -35,10 +36,13 @@ import {
 import {
   checkCacheBatch,
   checkCacheExists,
+  checkCacheHealth,
+  checkCacheExistsByMetadata,
   deleteCacheMetadata,
   getCacheList,
   getCacheStatistics,
   initCacheMetadata,
+  repairCacheMetadata,
   saveCacheMetadata,
   updateCacheAccessTime
 } from './cacheService.js';
@@ -1509,7 +1513,7 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
   setCorsHeaders(req, res, context.config);
   res.writeHead(200, {
     'Content-Type': 'application/zip',
-    'Content-Disposition': `attachment; filename="${encodeURIComponent(zipFileName)}"`
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(zipFileName)}`
   });
 
   // 将ZIP输出流连接到响应
@@ -1556,72 +1560,89 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
       const sn = garment.sn;
       let qrBuffer;
 
-      if (type === 'mini-program') {
-        try {
-          // 生成圆形小程序码，使用 scene 参数传递 SN
-          const qrResult = await getWechatUnlimitedQRCode(
-            {
-              accessToken,
-              scene: sn,
-              page: context.config.wechatQrPage || 'pages/garment/detail',
-              checkPath: context.config.wechatQrCheckPath || false,
-              envVersion: context.config.wechatQrEnvVersion || 'release',
-              width: context.config.wechatQrWidth || 430
-            },
-            fetch
-          );
-          qrBuffer = qrResult.buffer;
-        } catch (error) {
-          console.error(`Failed to generate mini-program QR for ${sn}:`, error.message);
-          // 回退到传统二维码
-          const fallbackUrl = detailUrl(context.config, sn);
-          qrBuffer = await QRCode.toBuffer(fallbackUrl, {
-            type: 'png',
-            width: 512,
-            margin: 1,
-            errorCorrectionLevel: 'M',
-            color: { dark: '#161616', light: '#ffffff' }
-          });
-        }
-      } else if (type === 'mini-program-square') {
-        try {
-          const qrResult = await getWechatQRCode(
-            {
-              accessToken,
-              path: `${context.config.wechatQrPage || 'pages/garment/detail'}?sn=${sn}`,
-              width: context.config.wechatQrWidth || 430
-            },
-            fetch
-          );
-          qrBuffer = qrResult.buffer;
-        } catch (error) {
-          console.error(`Failed to generate mini-program square QR for ${sn}:`, error.message);
-          const fallbackUrl = detailUrl(context.config, sn);
-          qrBuffer = await QRCode.toBuffer(fallbackUrl, {
-            type: 'png',
-            width: 512,
-            margin: 1,
-            errorCorrectionLevel: 'M',
-            color: { dark: '#161616', light: '#ffffff' }
-          });
-        }
+      // 先尝试从缓存获取
+      const cached = getQrCode(sn, type, context.config.qrCacheDir);
+      if (cached) {
+        console.log(`[ZIP Export] Cache HIT: ${sn} (${type})`);
+        qrBuffer = cached;
       } else {
-        // 传统二维码（SN 或 URL）
-        const content = type === 'sn' ? sn : detailUrl(context.config, sn);
-        qrBuffer = await QRCode.toBuffer(content, {
-          type: 'png',
-          width: 512,
-          margin: 1,
-          errorCorrectionLevel: 'M',
-          color: { dark: '#161616', light: '#ffffff' }
-        });
-      }
+        console.log(`[ZIP Export] Cache MISS: ${sn} (${type}), generating...`);
+        // 缓存未命中，生成二维码
+        if (type === 'mini-program') {
+          try {
+            // 生成圆形小程序码，使用 scene 参数传递 SN
+            const qrResult = await getWechatUnlimitedQRCode(
+              {
+                accessToken,
+                scene: sn,
+                page: context.config.wechatQrPage || 'pages/garment/detail',
+                checkPath: context.config.wechatQrCheckPath || false,
+                envVersion: context.config.wechatQrEnvVersion || 'release',
+                width: context.config.wechatQrWidth || 430
+              },
+              fetch
+            );
+            qrBuffer = qrResult.buffer;
+          } catch (error) {
+            console.error(`Failed to generate mini-program QR for ${sn}:`, error.message);
+            // 回退到传统二维码
+            const fallbackUrl = detailUrl(context.config, sn);
+            qrBuffer = await QRCode.toBuffer(fallbackUrl, {
+              type: 'png',
+              width: 512,
+              margin: 1,
+              errorCorrectionLevel: 'M',
+              color: { dark: '#161616', light: '#ffffff' }
+            });
+          }
+        } else if (type === 'mini-program-square') {
+          try {
+            const qrResult = await getWechatQRCode(
+              {
+                accessToken,
+                path: `${context.config.wechatQrPage || 'pages/garment/detail'}?sn=${sn}`,
+                width: context.config.wechatQrWidth || 430
+              },
+              fetch
+            );
+            qrBuffer = qrResult.buffer;
+          } catch (error) {
+            console.error(`Failed to generate mini-program square QR for ${sn}:`, error.message);
+            const fallbackUrl = detailUrl(context.config, sn);
+            qrBuffer = await QRCode.toBuffer(fallbackUrl, {
+              type: 'png',
+              width: 512,
+              margin: 1,
+              errorCorrectionLevel: 'M',
+              color: { dark: '#161616', light: '#ffffff' }
+            });
+          }
+        } else {
+          // 传统二维码（SN 或 URL）
+          const content = type === 'sn' ? sn : detailUrl(context.config, sn);
+          qrBuffer = await QRCode.toBuffer(content, {
+            type: 'png',
+            width: 512,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: { dark: '#161616', light: '#ffffff' }
+          });
+        }
 
-      // 保存到缓存（同步操作，不阻塞 ZIP 流）
-      try {
-        setQrCode(sn, type, qrBuffer, context.config.qrCacheDir);
-      } catch (err) {
-        console.error(`缓存二维码 ${sn} 失败:`, err.message);
+        // 保存到缓存（同步操作，不阻塞 ZIP 流）
+        try {
+          setQrCode(sn, type, qrBuffer, context.config.qrCacheDir);
+          // 同时保存元数据
+          try {
+            const filePath = getCacheFilePath(sn, type, context.config.qrCacheDir);
+            saveCacheMetadata(context.db, sn, type, filePath, qrBuffer.length);
+          } catch (err) {
+            console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+          }
+          console.log(`[ZIP Export] Cached: ${sn} (${type})`);
+        } catch (err) {
+          console.error(`缓存二维码 ${sn} 失败:`, err.message);
+        }
       }
 
       // 添加到ZIP
@@ -1651,6 +1672,285 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
       res.destroy();
     }
   }
+}
+
+/**
+ * 处理Excel导出（包含二维码图片）
+ */
+async function handleExcelExportWithQrCodes(req, res, context) {
+  requireAdmin(req, context.config);
+  const body = await readJson(req);
+
+  const { garments, qrMode, includeQrImages, batchId, clothing } = body;
+  const type = normalizeQrType(qrMode) || 'url';
+
+  if (!Array.isArray(garments) || garments.length === 0) {
+    throw new HttpError(400, '请提供导出数据');
+  }
+
+  // 创建 Excel 工作簿
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('批次吊牌码');
+
+  // 定义列
+  const columns = [
+    { header: '衣服名称', key: 'clothingName', width: 20 },
+    { header: '执行标准', key: 'standard', width: 30 },
+    { header: '款号', key: 'styleNo', width: 14 },
+    { header: '颜色', key: 'color', width: 10 },
+    { header: '尺码', key: 'size', width: 8 },
+    { header: 'SN', key: 'sn', width: 20 },
+    { header: '批次标签', key: 'batchNo', width: 18 },
+    { header: '生产日期', key: 'productionDate', width: 12 },
+    { header: '详情页链接', key: 'detailUrl', width: 40 },
+    { header: '二维码模式', key: 'qrModeLabel', width: 14 },
+    { header: '二维码链接', key: 'qrUrl', width: 50 }
+  ];
+
+  if (includeQrImages) {
+    columns.push({ header: '二维码', key: 'qrImage', width: 15 });
+  }
+
+  worksheet.columns = columns;
+
+  // 添加数据行
+  for (let i = 0; i < garments.length; i++) {
+    const record = garments[i];
+    const sn = record.sn;
+
+    // 获取二维码图片（从缓存或生成）
+    let qrBuffer = null;
+    if (includeQrImages) {
+      qrBuffer = await getOrGenerateQrCode(context, sn, type);
+    }
+
+    // 构建行数据
+    const rowData = {
+      clothingName: clothing?.productName || record.productName || '',
+      standard: formatStandardValue(clothing?.standard || record.standard || ''),
+      styleNo: record.styleNo || '',
+      color: record.color || '',
+      size: record.size || '',
+      sn,
+      batchNo: record.batchNo || '',
+      productionDate: record.productionDate || '',
+      detailUrl: `${context.config.frontendBaseUrl}/#/pages/garment/detail?sn=${encodeURIComponent(sn)}`,
+      qrModeLabel: getQrModeLabel(type),
+      qrUrl: `${context.config.apiBaseUrl}/api/qrcode/${encodeURIComponent(sn)}?type=${type}`
+    };
+
+    worksheet.addRow(rowData);
+
+    // 添加二维码图片
+    if (includeQrImages && qrBuffer) {
+      const imageId = workbook.addImage({
+        buffer: qrBuffer,
+        extension: 'png'
+      });
+
+      worksheet.addImage(imageId, {
+        tl: { col: columns.length - 1, row: i + 1 },
+        ext: { width: 100, height: 100 }
+      });
+    }
+  }
+
+  // 设置行高
+  if (includeQrImages) {
+    for (let i = 2; i <= garments.length + 1; i++) {
+      worksheet.getRow(i).height = 80;
+    }
+  }
+
+  // 生成文件
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  setCorsHeaders(req, res, context.config);
+  res.writeHead(200, {
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`吊牌码-${batchId || 'export'}.xlsx`)}`
+  });
+  res.end(buffer);
+}
+
+/**
+ * 获取或生成二维码
+ */
+async function getOrGenerateQrCode(context, sn, type) {
+  const cacheDir = context.config.qrCacheDir;
+
+  // 先尝试从缓存获取
+  let qrBuffer = getQrCode(sn, type, cacheDir);
+
+  if (!qrBuffer) {
+    // 缓存未命中，生成二维码
+    qrBuffer = await generateQrCodeImpl(context, sn, type);
+    // 保存到缓存
+    if (qrBuffer) {
+      setQrCode(sn, type, qrBuffer, cacheDir);
+      try {
+        const filePath = getCacheFilePath(sn, type, cacheDir);
+        saveCacheMetadata(context.db, sn, type, filePath, qrBuffer.length);
+      } catch (err) {
+        console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+      }
+    }
+  }
+
+  return qrBuffer;
+}
+
+/**
+ * 生成二维码实现
+ */
+async function generateQrCodeImpl(context, sn, type) {
+  const fallbackContent = detailUrl(context.config, sn);
+
+  // 微信小程序码（圆形）
+  if (type === 'mini-program') {
+    const hasValidWechatConfig =
+      context.config.wechatAppId &&
+      context.config.wechatAppSecret &&
+      typeof context.config.wechatAppId === 'string' &&
+      typeof context.config.wechatAppSecret === 'string' &&
+      context.config.wechatAppId.trim() !== '' &&
+      context.config.wechatAppSecret.trim() !== '';
+
+    if (hasValidWechatConfig) {
+      try {
+        let accessToken;
+        if (context.config.wechatAccessTokenProvider) {
+          const tokenResult = await context.config.wechatAccessTokenProvider();
+          accessToken = tokenResult.accessToken;
+        } else {
+          const tokenResult = await getWechatAccessToken(
+            context.config.wechatAppId,
+            context.config.wechatAppSecret,
+            fetch
+          );
+          accessToken = tokenResult.accessToken;
+        }
+
+        const qrResult = await getWechatUnlimitedQRCode(
+          {
+            accessToken,
+            scene: sn,
+            page: context.config.wechatQrPage || 'pages/garment/detail',
+            checkPath: context.config.wechatQrCheckPath || false,
+            envVersion: context.config.wechatQrEnvVersion || 'release',
+            width: context.config.wechatQrWidth || 430
+          },
+          fetch
+        );
+        return qrResult.buffer;
+      } catch (error) {
+        console.log(`Mini-program QR code generation failed for ${sn}, falling back to traditional QR:`, error.message);
+      }
+    }
+    // 回退到传统二维码
+    return await QRCode.toBuffer(fallbackContent, {
+      type: 'png',
+      width: 512,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#161616', light: '#ffffff' }
+    });
+  }
+
+  // 微信小程序正方形二维码
+  if (type === 'mini-program-square') {
+    const hasValidWechatConfig =
+      context.config.wechatAppId &&
+      context.config.wechatAppSecret &&
+      typeof context.config.wechatAppId === 'string' &&
+      typeof context.config.wechatAppSecret === 'string' &&
+      context.config.wechatAppId.trim() !== '' &&
+      context.config.wechatAppSecret.trim() !== '';
+
+    if (hasValidWechatConfig) {
+      try {
+        let accessToken;
+        if (context.config.wechatAccessTokenProvider) {
+          const tokenResult = await context.config.wechatAccessTokenProvider();
+          accessToken = tokenResult.accessToken;
+        } else {
+          const tokenResult = await getWechatAccessToken(
+            context.config.wechatAppId,
+            context.config.wechatAppSecret,
+            fetch
+          );
+          accessToken = tokenResult.accessToken;
+        }
+
+        const qrResult = await getWechatQRCode(
+          {
+            accessToken,
+            path: `${context.config.wechatQrPage || 'pages/garment/detail'}?sn=${sn}`,
+            width: context.config.wechatQrWidth || 430
+          },
+          fetch
+        );
+        return qrResult.buffer;
+      } catch (error) {
+        console.log(`Mini-program square QR code generation failed for ${sn}, falling back to traditional QR:`, error.message);
+      }
+    }
+    // 回退到传统二维码
+    return await QRCode.toBuffer(fallbackContent, {
+      type: 'png',
+      width: 512,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#161616', light: '#ffffff' }
+    });
+  }
+
+  // 传统二维码（SN 或 URL）
+  if (type === 'sn') {
+    return await QRCode.toBuffer(sn, {
+      type: 'png',
+      width: 512,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#161616', light: '#ffffff' }
+    });
+  }
+
+  // 默认 URL 二维码
+  return await QRCode.toBuffer(fallbackContent, {
+    type: 'png',
+    width: 512,
+    margin: 1,
+    errorCorrectionLevel: 'M',
+    color: { dark: '#161616', light: '#ffffff' }
+  });
+}
+
+/**
+ * 获取二维码模式标签
+ */
+function getQrModeLabel(mode) {
+  switch (mode) {
+    case 'mini-program':
+      return '微信小程序码';
+    case 'mini-program-square':
+      return '微信小程序二维码';
+    case 'sn':
+      return '原始 SN 码';
+    default:
+      return 'H5 链接二维码';
+  }
+}
+
+/**
+ * 格式化执行标准
+ */
+function formatStandardValue(value) {
+  return String(value || '')
+    .split(/[\n\r；;、,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join('；');
 }
 
 async function route(req, res, context) {
@@ -1937,8 +2237,52 @@ async function route(req, res, context) {
       throw new HttpError(400, '单次最多检查 10000 个 SN');
     }
 
-    const result = checkCacheBatch(context.db, sns, type);
+    const result = checkCacheBatch(context.db, sns, type, context.config.qrCacheDir);
     sendJson(req, res, context.config, 200, result);
+    return;
+  }
+
+  // 修复缓存元数据
+  if (pathname === '/api/admin/qrcode/cache/repair' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const result = repairCacheMetadata(context.db, context.config.qrCacheDir);
+    sendJson(req, res, context.config, 200, result);
+    return;
+  }
+
+  // 检查缓存健康状态
+  if (pathname === '/api/admin/qrcode/cache/health' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const body = await readJson(req);
+    const sns = body.sns || [];
+    const type = normalizeQrType(body.type) || 'url';
+
+    if (!Array.isArray(sns) || sns.length === 0) {
+      throw new HttpError(400, '请提供 SN 列表');
+    }
+
+    const health = checkCacheHealth(context.db, sns, type, context.config.qrCacheDir);
+    sendJson(req, res, context.config, 200, health);
+    return;
+  }
+
+  // 删除单个缓存
+  if (pathname === '/api/admin/qrcode/cache/delete' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const body = await readJson(req);
+    const sn = body.sn || '';
+    const type = normalizeQrType(body.type) || 'url';
+
+    if (!sn) {
+      throw new HttpError(400, '请提供 SN');
+    }
+
+    // 删除缓存
+    deleteQrCache(sn, type, context.config.qrCacheDir);
+    // 删除元数据
+    deleteCacheMetadata(context.db, sn, type);
+
+    sendJson(req, res, context.config, 200, { message: '缓存已删除' });
     return;
   }
 
@@ -2005,6 +2349,12 @@ async function route(req, res, context) {
 
   if (req.method === 'GET' && pathname === '/api/qrcode/batch') {
     await handleBatchQrCodes(req, res, context, searchParams);
+    return;
+  }
+
+  // Excel导出接口（包含二维码图片）
+  if (pathname === '/api/admin/export/excel-with-qrcodes' && req.method === 'POST') {
+    await handleExcelExportWithQrCodes(req, res, context);
     return;
   }
 

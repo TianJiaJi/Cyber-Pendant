@@ -3,6 +3,7 @@ import { getToken } from './utils/api.js';
 import LoginView from './views/LoginView.vue';
 import DashboardView from './views/DashboardView.vue';
 import ClothingDetailView from './views/ClothingDetailView.vue';
+import CacheManageView from './views/CacheManageView.vue';
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -11,6 +12,7 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/dashboard', component: DashboardView },
     { path: '/clothes/:id', component: ClothingDetailView, props: true },
+    { path: '/cache/manage', component: CacheManageView },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' }
   ]
 });

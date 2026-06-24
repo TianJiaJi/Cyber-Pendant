@@ -414,3 +414,85 @@ export async function downloadBatchQrCodes(batchId, type = QRCODE_MODE_URL, prog
   link.remove();
   window.URL.revokeObjectURL(url);
 }
+
+/**
+ * 导出Excel（包含二维码图片）
+ */
+export async function exportExcelWithQrCodes(garments, qrMode, includeQrImages, batchId, clothing) {
+  const token = localStorage.getItem(TOKEN_KEY);
+
+  const response = await fetch(`${API_BASE_URL}/api/admin/export/excel-with-qrcodes`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({ garments, qrMode, includeQrImages, batchId, clothing })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      statusCode: response.status,
+      message: error.message || '导出失败'
+    };
+  }
+
+  // 从响应头获取文件名
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = `吊牌码-${batchId || 'export'}.xlsx`;
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    if (match && match[1]) {
+      filename = decodeURIComponent(match[1].replace(/['"]/g, ''));
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * 检查缓存健康状态
+ */
+export async function checkQrCacheHealth(sns, type = QRCODE_MODE_URL) {
+  return request('/api/admin/qrcode/cache/health', {
+    method: 'POST',
+    data: { sns, type }
+  });
+}
+
+/**
+ * 修复缓存元数据
+ */
+export async function repairQrCache() {
+  return request('/api/admin/qrcode/cache/repair', {
+    method: 'POST'
+  });
+}
+
+/**
+ * 清空所有缓存
+ */
+export async function clearQrCache() {
+  return request('/api/admin/qrcode/cache/clear', {
+    method: 'POST'
+  });
+}
+
+/**
+ * 删除单个缓存
+ */
+export async function deleteQrCache(sn, type = QRCODE_MODE_URL) {
+  return request('/api/admin/qrcode/cache/delete', {
+    method: 'POST',
+    data: { sn, type }
+  });
+}

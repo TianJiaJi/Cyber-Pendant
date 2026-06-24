@@ -7,7 +7,8 @@ import {
   getQrCode as getQrFromCache,
   setQrCode as setQrToCache,
   getCacheStats,
-  clearAll as clearAllCache
+  clearAll as clearAllCache,
+  getCacheFilePath
 } from './qrCache.js';
 import { openDatabase } from './db.js';
 import QRCode from 'qrcode';
@@ -82,8 +83,9 @@ export function deleteCacheMetadata(db, sn, type) {
 
 /**
  * 检查缓存是否存在（通过元数据）
+ * @deprecated 使用 checkCacheExistsWithFile 代替，此函数仅用于健康检查
  */
-export function checkCacheExists(db, sn, type) {
+export function checkCacheExistsByMetadata(db, sn, type) {
   const stmt = db.prepare(`
     SELECT 1 FROM ${CACHE_METADATA_TABLE}
     WHERE sn = ? AND type = ?
@@ -93,28 +95,49 @@ export function checkCacheExists(db, sn, type) {
 }
 
 /**
+ * 检查缓存是否存在（验证文件）
+ * 文件系统是单一真实源，元数据必须与文件保持一致
+ */
+export function checkCacheExists(db, sn, type, cacheDir) {
+  // 先检查文件是否存在
+  const filePath = getCacheFilePath(sn, type, cacheDir);
+  if (!existsSync(filePath)) {
+    // 文件不存在，删除元数据记录
+    deleteCacheMetadata(db, sn, type);
+    return false;
+  }
+
+  // 文件存在，检查/更新元数据
+  const stmt = db.prepare(`
+    SELECT 1 FROM ${CACHE_METADATA_TABLE}
+    WHERE sn = ? AND type = ?
+    LIMIT 1
+  `);
+  const exists = stmt.get(sn, type) !== undefined;
+
+  if (!exists) {
+    // 重建元数据
+    try {
+      const stats = statSync(filePath);
+      saveCacheMetadata(db, sn, type, filePath, stats.size);
+    } catch (err) {
+      console.error(`重建元数据失败 [${sn}/${type}]:`, err.message);
+    }
+  }
+
+  return true;
+}
+
+/**
  * 批量检查缓存
  * @returns {Object} { cached: string[], uncached: string[] }
  */
-export function checkCacheBatch(db, sns, type) {
+export function checkCacheBatch(db, sns, type, cacheDir) {
   const cached = [];
   const uncached = [];
 
-  // 构建批量查询
-  const placeholders = sns.map(() => '?').join(',');
-  const stmt = db.prepare(`
-    SELECT sn FROM ${CACHE_METADATA_TABLE}
-    WHERE sn IN (${placeholders}) AND type = ?
-  `);
-
-  const cachedSet = new Set();
-  const results = stmt.all(...sns, type);
-  for (const row of results) {
-    cachedSet.add(row.sn);
-  }
-
   for (const sn of sns) {
-    if (cachedSet.has(sn)) {
+    if (checkCacheExists(db, sn, type, cacheDir)) {
       cached.push(sn);
     } else {
       uncached.push(sn);
@@ -281,7 +304,7 @@ export function migrateFileCacheToMetadata(db, cacheDir) {
           const [, sn, type] = match;
 
           // 检查是否已存在
-          if (checkCacheExists(db, sn, type)) {
+          if (checkCacheExistsByMetadata(db, sn, type)) {
             skipped++;
             continue;
           }
@@ -305,4 +328,51 @@ export function migrateFileCacheToMetadata(db, cacheDir) {
   }
 
   return { imported, skipped };
+}
+
+/**
+ * 修复缓存元数据
+ * 扫描文件系统，同步元数据表（删除无效记录，重建缺失记录）
+ */
+export function repairCacheMetadata(db, cacheDir) {
+  // 1. 删除文件不存在的元数据
+  const allRecords = getCacheList(db, { limit: 999999 });
+  let deleted = 0;
+
+  for (const record of allRecords) {
+    if (!existsSync(record.file_path)) {
+      deleteCacheMetadata(db, record.sn, record.type);
+      deleted++;
+    }
+  }
+
+  // 2. 为没有元数据的文件添加记录
+  const { imported } = migrateFileCacheToMetadata(db, cacheDir);
+
+  return { deleted, added: imported };
+}
+
+/**
+ * 检查缓存健康状态
+ * 快速检测元数据与文件系统是否一致
+ * @returns {Object} { needsRepair: boolean, inconsistencyCount: number }
+ */
+export function checkCacheHealth(db, sns, type, cacheDir) {
+  let inconsistentCount = 0;
+
+  for (const sn of sns) {
+    // 元数据显示已缓存
+    const metadataExists = checkCacheExistsByMetadata(db, sn, type);
+
+    if (metadataExists) {
+      // 检查文件是否真实存在
+      const filePath = getCacheFilePath(sn, type, cacheDir);
+      if (!existsSync(filePath)) {
+        inconsistentCount++;
+      }
+    }
+  }
+
+  const needsRepair = inconsistentCount > 0;
+  return { needsRepair, inconsistencyCount: inconsistentCount };
 }

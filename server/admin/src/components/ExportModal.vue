@@ -53,15 +53,31 @@
             <div class="cache-status">
               <div class="cache-status-item">
                 <span class="cache-status-label">已缓存</span>
-                <span class="cache-status-value cached">{{ cacheStatus.cachedCount }} 个</span>
+                <span class="cache-status-value" :class="cacheNeedsRepair ? 'warning' : 'cached'">{{ cacheStatus.cachedCount }} 个</span>
               </div>
               <div class="cache-status-item">
                 <span class="cache-status-label">未缓存</span>
                 <span class="cache-status-value uncached">{{ cacheStatus.uncachedCount }} 个</span>
               </div>
-              <div v-if="cacheStatus.uncachedCount > 0" class="cache-warning">
-                未缓存的二维码将在导出时实时生成，可能需要较长时间
-              </div>
+            </div>
+
+            <!-- 自动检测提示 -->
+            <div v-if="cacheNeedsRepair" class="cache-warning">
+              检测到缓存不一致（{{ cacheInconsistencyCount }} 项），建议修复后再导出
+            </div>
+
+            <!-- 操作按钮 -->
+            <div v-if="showCacheStatus" class="cache-actions">
+              <button v-if="cacheNeedsRepair" class="primary-button small-button" @click="repairCache" :disabled="isExporting">
+                修复缓存
+              </button>
+              <button class="ghost-button small-button" @click="refreshCacheStatus" :disabled="isExporting">
+                刷新状态
+              </button>
+            </div>
+
+            <div v-if="cacheStatus.uncachedCount > 0 && !cacheNeedsRepair" class="cache-info">
+              未缓存的二维码将在导出时实时生成
             </div>
           </div>
 
@@ -100,19 +116,20 @@
 
 <script setup>
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue';
-import { checkCacheStatus, getOrDownloadQrCode } from '../utils/qrCache.js';
 import {
   qrcodeUrl,
   downloadBatchQrCodes,
   createProgress,
   pollProgress,
   checkQrCacheBatch,
+  checkQrCacheHealth,
+  repairQrCache,
+  exportExcelWithQrCodes,
   QRCODE_MODE_URL,
   QRCODE_MODE_MINIPROGRAM,
   QRCODE_MODE_MINIPROGRAM_SQUARE,
   QRCODE_MODE_SN
 } from '../utils/api.js';
-import ExcelJS from 'exceljs';
 
 const props = defineProps({
   isOpen: {
@@ -142,6 +159,8 @@ const progressCurrent = ref(0);
 const progressTotal = ref(0);
 const errorMessage = ref('');
 const cacheStatus = ref({ cachedCount: 0, uncachedCount: 0 });
+const cacheNeedsRepair = ref(false);
+const cacheInconsistencyCount = ref(0);
 
 const formatOptions = [
   {
@@ -219,6 +238,7 @@ watch(
   () => [props.batch, props.qrMode, includeQrImages.value],
   async () => {
     if (props.isOpen && props.batch?.garments && (includeQrImages.value || selectedFormat.value === 'zip')) {
+      await checkCacheHealth();
       await updateCacheStatus();
     }
   },
@@ -227,21 +247,48 @@ watch(
 
 watch(selectedFormat, async () => {
   if (props.isOpen && props.batch?.garments) {
+    await checkCacheHealth();
     await updateCacheStatus();
   }
 });
 
+// 监听弹窗打开，自动检查缓存健康
+watch(() => props.isOpen, async (isOpen) => {
+  if (isOpen && props.batch?.garments) {
+    await checkCacheHealth();
+  }
+});
+
+async function checkCacheHealth() {
+  const garments = props.batch?.garments || [];
+  if (garments.length === 0) return;
+
+  const sns = garments.map(g => g.sn);
+  const type = props.qrMode;
+
+  if (selectedFormat.value === 'zip' || (selectedFormat.value === 'excel' && includeQrImages.value)) {
+    try {
+      const health = await checkQrCacheHealth(sns, type);
+      cacheNeedsRepair.value = health.needsRepair;
+      cacheInconsistencyCount.value = health.inconsistencyCount;
+    } catch (error) {
+      console.error('缓存健康检查失败:', error);
+    }
+  }
+}
+
 async function updateCacheStatus() {
   const garments = props.batch?.garments || [];
+  const sns = garments.map(g => g.sn);
   const type = props.qrMode;
 
   if (selectedFormat.value === 'zip' || (selectedFormat.value === 'excel' && includeQrImages.value)) {
     // 使用批量检查接口（一次性检查所有 SN）
     try {
-      const status = await checkCacheStatus(garments, type, checkQrCacheBatch);
+      const status = await checkQrCacheBatch(sns, type);
       cacheStatus.value = {
-        cachedCount: status.cached.size,
-        uncachedCount: status.uncached.size
+        cachedCount: status.cached.length,
+        uncachedCount: status.uncached.length
       };
     } catch (error) {
       console.error('检查缓存状态失败:', error);
@@ -296,110 +343,30 @@ async function handleExport() {
 }
 
 async function exportExcel(garments) {
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('批次吊牌码');
+  // 调用后端API生成Excel（包含二维码图片）
+  await exportExcelWithQrCodes(
+    garments,
+    props.qrMode,
+    includeQrImages.value,
+    props.batch?.id,
+    props.clothing
+  );
+}
 
-  // 定义列
-  const columns = [
-    { header: '衣服名称', key: 'clothingName', width: 20 },
-    { header: '执行标准', key: 'standard', width: 30 },
-    { header: '款号', key: 'styleNo', width: 14 },
-    { header: '颜色', key: 'color', width: 10 },
-    { header: '尺码', key: 'size', width: 8 },
-    { header: 'SN', key: 'sn', width: 20 },
-    { header: '批次标签', key: 'batchNo', width: 18 },
-    { header: '生产日期', key: 'productionDate', width: 12 },
-    { header: '详情页链接', key: 'detailUrl', width: 40 },
-    { header: '二维码模式', key: 'qrModeLabel', width: 14 },
-    { header: '二维码链接', key: 'qrUrl', width: 50 }
-  ];
-
-  // 如果包含二维码图片，增加一列
-  if (includeQrImages.value) {
-    columns.push({ header: '二维码', key: 'qrImage', width: 15 });
+async function repairCache() {
+  try {
+    const result = await repairQrCache();
+    console.log('缓存修复完成:', result);
+    await checkCacheHealth();
+    await updateCacheStatus();
+  } catch (error) {
+    errorMessage.value = '修复缓存失败: ' + (error.message || error);
   }
+}
 
-  worksheet.columns = columns;
-
-  // 添加数据行
-  for (let i = 0; i < garments.length; i++) {
-    const record = garments[i];
-    progressCurrent.value = i + 1;
-
-    // 确保进度条更新（每处理一条就让 Vue 渲染一次）
-    await nextTick();
-
-    const clothingName = props.clothing?.productName || record.productName || '';
-    const standard = formatStandard(props.clothing?.standard || record.standard || '');
-    const styleNo = props.batch?.styleNo || record.styleNo || '';
-    const color = props.batch?.color || record.color || '';
-    const size = props.batch?.size || record.size || '';
-    const sn = record.sn;
-    const batchNo = props.batch?.batchNo || record.batchNo || '';
-    const productionDate = props.batch?.productionDate || record.productionDate || '';
-    const detailUrl = `${window.location.origin}/#/pages/garment/detail?sn=${encodeURIComponent(sn)}`;
-    const qrModeLabel = getQrModeLabel(props.qrMode);
-    const qrUrl = qrcodeUrl(sn, props.qrMode);
-
-    const rowData = {
-      clothingName,
-      standard,
-      styleNo,
-      color,
-      size,
-      sn,
-      batchNo,
-      productionDate,
-      detailUrl,
-      qrModeLabel,
-      qrUrl
-    };
-
-    worksheet.addRow(rowData);
-
-    // 如果需要二维码图片
-    if (includeQrImages.value) {
-      try {
-        // 获取或下载二维码
-        const base64 = await getOrDownloadQrCode(sn, props.qrMode, qrUrl);
-
-        // 提取 base64 数据
-        const base64Data = base64.split(',')[1];
-
-        // 添加图片到工作簿
-        const imageId = workbook.addImage({
-          base64: base64Data,
-          extension: 'png'
-        });
-
-        // 计算图片位置（在最后一列）
-        const rowIndex = i + 2; // +2 因为有标题行且从1开始
-        const colIndex = columns.length;
-
-        worksheet.addImage(imageId, {
-          tl: { col: colIndex - 1, row: rowIndex - 1 },
-          ext: { width: 100, height: 100 }
-        });
-      } catch (error) {
-        console.error(`获取二维码 ${sn} 失败:`, error);
-        worksheet.getCell(rowIndex, columns.length).value = '加载失败';
-      }
-    }
-  }
-
-  // 设置行高以适应图片
-  if (includeQrImages.value) {
-    for (let i = 2; i <= garments.length + 1; i++) {
-      worksheet.getRow(i).height = 80;
-    }
-  }
-
-  // 生成文件
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  });
-  downloadBlob(blob, getFileName('xlsx'));
+async function refreshCacheStatus() {
+  await checkCacheHealth();
+  await updateCacheStatus();
 }
 
 async function exportCsv(garments) {
@@ -776,6 +743,10 @@ function downloadBlob(blob, filename) {
   color: #4f874d;
 }
 
+.cache-status-value.warning {
+  color: #b97a0a;
+}
+
 .cache-status-value.uncached {
   color: #8d3c22;
 }
@@ -828,6 +799,20 @@ function downloadBlob(blob, filename) {
 .error-icon {
   flex: 0 0 auto;
   font-size: 16px;
+}
+
+.cache-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cache-info {
+  padding: 8px 10px;
+  background: #f7fbf4;
+  border: 1px solid #b9cbb2;
+  border-radius: 4px;
+  color: #4f874d;
+  font-size: 12px;
 }
 
 @media (min-width: 680px) {

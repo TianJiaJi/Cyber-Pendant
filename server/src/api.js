@@ -15,6 +15,44 @@ import {
 } from './auth.js';
 import { createConfig } from './config.js';
 import {
+  createRateLimit,
+  escapeCsvValue,
+  getClientId,
+  setCorsHeaders,
+  setSecurityHeaders
+} from './security.js';
+import {
+  cleanupMemoryCache,
+  deleteQrCode as deleteQrCache,
+  getCacheKey,
+  getCacheStats,
+  getMemoryCacheInfo,
+  getQrCode,
+  getCacheFilePath,
+  MEMORY_CACHE_TTL,
+  setQrCode
+} from './qrCache.js';
+import {
+  checkCacheBatch,
+  checkCacheExists,
+  deleteCacheMetadata,
+  getCacheList,
+  getCacheStatistics,
+  initCacheMetadata,
+  saveCacheMetadata,
+  updateCacheAccessTime
+} from './cacheService.js';
+import {
+  completeProgress,
+  createProgress,
+  deleteProgress,
+  failProgress,
+  getAllProgress,
+  getProgress,
+  incrementProgress,
+  updateProgress
+} from './progressStore.js';
+import {
   bindGarmentOwner,
   closeLostReport,
   createLostReport,
@@ -78,22 +116,42 @@ class HttpError extends Error {
   }
 }
 
-function setCorsHeaders(req, res, config) {
-  const origin =
-    config.corsOrigin === '*' ? '*' : req.headers.origin || config.corsOrigin;
+// 速率限制器实例
+const loginRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000, // 15分钟
+  maxAttempts: 5,            // 最多5次失败尝试
+  skipSuccessfulRequests: true
+});
 
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-}
+const apiRateLimit = createRateLimit({
+  windowMs: 60 * 1000, // 1分钟
+  maxAttempts: 100     // 每分钟100次请求
+});
+
+const contactRevealRateLimit = createRateLimit({
+  windowMs: 24 * 60 * 60 * 1000, // 24小时
+  maxAttempts: 10                 // 每天最多10次查看
+});
+
+const snQueryRateLimit = createRateLimit({
+  windowMs: 60 * 1000, // 1分钟
+  maxAttempts: 30     // 每分钟30次查询
+});
+
+const wechatLoginRateLimit = createRateLimit({
+  windowMs: 60 * 60 * 1000, // 1小时
+  maxAttempts: 20            // 每小时最多20次登录尝试
+});
 
 function sendJson(req, res, config, status, payload) {
+  setSecurityHeaders(res, { isHttps: req.headers['x-forwarded-proto'] === 'https' });
   setCorsHeaders(req, res, config);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
 }
 
 function sendNoContent(req, res, config) {
+  setSecurityHeaders(res, { isHttps: req.headers['x-forwarded-proto'] === 'https' });
   setCorsHeaders(req, res, config);
   res.writeHead(204);
   res.end();
@@ -405,14 +463,27 @@ function batchWithGarments(context, batch) {
 }
 
 async function handleLogin(req, res, context) {
+  const clientId = getClientId(req);
+
+  // 检查登录限流
+  const loginRateLimitResult = loginRateLimit.check(clientId);
+  if (!loginRateLimitResult.allowed) {
+    throw new HttpError(429, '登录尝试次数过多，请15分钟后再试');
+  }
+
   const body = await readJson(req);
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
   const admin = findAdminByUsername(context.db, username);
 
   if (!admin || !verifyPassword(password, admin.password_hash)) {
+    // 记录失败尝试
+    loginRateLimit.recordFailure(clientId);
     throw new HttpError(401, '用户名或密码错误');
   }
+
+  // 成功登录，清除失败记录
+  loginRateLimit.clear(clientId);
 
   const token = createToken(admin, context.config.tokenSecret);
   sendJson(req, res, context.config, 200, {
@@ -425,6 +496,14 @@ async function handleLogin(req, res, context) {
 }
 
 async function handleWechatLogin(req, res, context) {
+  const clientId = getClientId(req);
+
+  // 检查微信登录限流
+  const rateLimitResult = wechatLoginRateLimit.check(clientId);
+  if (!rateLimitResult.allowed) {
+    throw new HttpError(429, '登录尝试次数过多，请稍后再试');
+  }
+
   const body = await readJson(req);
   const code = String(body.code || '').trim();
 
@@ -441,10 +520,12 @@ async function handleWechatLogin(req, res, context) {
       context.config.wechatAppSecret
     );
   } catch (error) {
+    wechatLoginRateLimit.recordFailure(clientId);
     throw new HttpError(error.status || 401, error.message || '微信登录失败', error.details);
   }
 
   if (wechatResult.errcode) {
+    wechatLoginRateLimit.recordFailure(clientId);
     throw new HttpError(401, wechatResult.errmsg || '微信登录失败', {
       errcode: wechatResult.errcode
     });
@@ -542,6 +623,13 @@ function normalizeBindingInput(body) {
 }
 
 function handlePublicGarment(req, res, context, sn, searchParams) {
+  // 检查SN查询限流
+  const clientId = getClientId(req);
+  const rateLimitResult = snQueryRateLimit.check(clientId);
+  if (!rateLimitResult.allowed) {
+    throw new HttpError(429, '查询过于频繁，请稍后再试');
+  }
+
   let viewerUserId = null;
   try {
     viewerUserId = requireUser(req, context.config).sub;
@@ -753,6 +841,12 @@ function handleCloseLostReport(req, res, context, sn) {
 async function handleContactReveal(req, res, context, sn) {
   const userPayload = requireUser(req, context.config);
 
+  // 检查联系方式查看限流
+  const rateLimitResult = contactRevealRateLimit.check(String(userPayload.sub));
+  if (!rateLimitResult.allowed) {
+    throw new HttpError(429, '今日查看次数已达上限，请明天再试');
+  }
+
   const row = findGarmentDetailBySn(context.db, sn);
   if (!row) {
     throw new HttpError(404, '未找到该 SN 对应的吊牌信息');
@@ -769,6 +863,10 @@ async function handleContactReveal(req, res, context, sn) {
     source: body.source,
     ...requestMeta(req)
   });
+
+  // 记录一次查看
+  contactRevealRateLimit.recordHit(String(userPayload.sub));
+
   const garment = toGarmentDto(updated, {
     viewerUserId: userPayload.sub,
     showContact: true
@@ -786,16 +884,8 @@ async function handleContactReveal(req, res, context, sn) {
   });
 }
 
-function escapeCsvValue(value) {
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  const text = String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
 function sendCsv(req, res, context, filename, rows) {
+  setSecurityHeaders(res, { isHttps: req.headers['x-forwarded-proto'] === 'https' });
   setCorsHeaders(req, res, context.config);
   const columns = rows.length ? Object.keys(rows[0]) : [];
   const body = [
@@ -930,8 +1020,8 @@ async function handleCreateBatch(req, res, context, clothingId) {
     throw new HttpError(400, '生成数量必须大于 0');
   }
 
-  if (count > 500) {
-    throw new HttpError(400, '单次最多生成 500 个吊牌');
+  if (count > 10000) {
+    throw new HttpError(400, '单次最多生成 10000 个吊牌');
   }
 
   const batchInput = {
@@ -1100,10 +1190,28 @@ async function handleQrCode(req, res, context, sn, searchParams) {
   }
 
   const type = normalizeQrType(searchParams.get('type'));
+  const cacheDir = context.config.qrCacheDir;
+
+  // 先尝试从缓存获取
+  const cached = getQrCode(sn, type, cacheDir);
+  if (cached) {
+    console.log(`[QR Cache] HIT: ${sn} (${type})`);
+    setCorsHeaders(req, res, context.config);
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400'  // 浏览器缓存1天
+    });
+    res.end(cached);
+    return;
+  }
+
+  console.log(`[QR Cache] MISS: ${sn} (${type}), generating...`);
+
+  // 缓存未命中，生成二维码
+  let qrImage;
 
   // 微信小程序码（圆形）：使用微信 getwxacodeunlimit 接口生成
   if (type === 'mini-program') {
-    let qrImage;
     let fetchError = null;
 
     const hasValidWechatConfig =
@@ -1165,10 +1273,23 @@ async function handleQrCode(req, res, context, sn, searchParams) {
       });
     }
 
+    // 保存到缓存
+    setQrCode(sn, type, qrImage, cacheDir);
+
+    // 同时保存元数据到数据库
+    try {
+      const filePath = getCacheFilePath(sn, type, cacheDir);
+      saveCacheMetadata(context.db, sn, type, filePath, qrImage.length);
+    } catch (err) {
+      console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+    }
+
+    console.log(`[QR Cache] SAVED: ${sn} (${type})`);
+
     setCorsHeaders(req, res, context.config);
     res.writeHead(200, {
       'Content-Type': 'image/png',
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'public, max-age=86400'
     });
     res.end(qrImage);
     return;
@@ -1176,7 +1297,6 @@ async function handleQrCode(req, res, context, sn, searchParams) {
 
   // 微信小程序正方形二维码：使用微信API生成
   if (type === 'mini-program-square') {
-    let qrImage;
     let fetchError = null;
 
     const hasValidWechatConfig =
@@ -1234,10 +1354,23 @@ async function handleQrCode(req, res, context, sn, searchParams) {
       });
     }
 
+    // 保存到缓存
+    setQrCode(sn, type, qrImage, cacheDir);
+
+    // 同时保存元数据到数据库
+    try {
+      const filePath = getCacheFilePath(sn, type, cacheDir);
+      saveCacheMetadata(context.db, sn, type, filePath, qrImage.length);
+    } catch (err) {
+      console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+    }
+
+    console.log(`[QR Cache] SAVED: ${sn} (${type})`);
+
     setCorsHeaders(req, res, context.config);
     res.writeHead(200, {
       'Content-Type': 'image/png',
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'public, max-age=86400'
     });
     res.end(qrImage);
     return;
@@ -1245,7 +1378,7 @@ async function handleQrCode(req, res, context, sn, searchParams) {
 
   // 传统二维码（SN 或 URL）
   const content = type === 'sn' ? sn : detailUrl(context.config, sn);
-  const png = await QRCode.toBuffer(content, {
+  qrImage = await QRCode.toBuffer(content, {
     type: 'png',
     width: 512,
     margin: 1,
@@ -1256,12 +1389,69 @@ async function handleQrCode(req, res, context, sn, searchParams) {
     }
   });
 
+  // 保存到缓存
+  setQrCode(sn, type, qrImage, cacheDir);
+
   setCorsHeaders(req, res, context.config);
   res.writeHead(200, {
     'Content-Type': 'image/png',
-    'Cache-Control': 'no-store'
+    'Cache-Control': 'public, max-age=86400'
   });
-  res.end(png);
+  res.end(qrImage);
+}
+
+/**
+ * SSE 进度推送端点
+ * @param {Object} req - HTTP请求
+ * @param {Object} res - HTTP响应
+ * @param {string} progressId - 进度ID
+ */
+function handleProgressSse(req, res, progressId) {
+  const progress = getProgress(progressId);
+  if (!progress) {
+    sendJson(req, res, context.config, 404, { message: '进度任务不存在' });
+    return;
+  }
+
+  // 设置 SSE 响应头
+  setSecurityHeaders(res, { isHttps: req.headers['x-forwarded-proto'] === 'https' });
+  setCorsHeaders(req, res, context.config);
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  // 发送初始状态
+  res.write(`data: ${JSON.stringify(progress)}\n\n`);
+
+  // 定期检查并发送进度更新
+  const interval = setInterval(() => {
+    const currentProgress = getProgress(progressId);
+
+    if (!currentProgress) {
+      // 进度任务已被删除
+      clearInterval(interval);
+      res.write('event: error\ndata: {"error":"进度任务已不存在"}\n\n');
+      res.end();
+      return;
+    }
+
+    // 发送当前进度
+    res.write(`data: ${JSON.stringify(currentProgress)}\n\n`);
+
+    // 如果已完成或失败，关闭连接
+    if (currentProgress.status === 'completed' || currentProgress.status === 'failed') {
+      clearInterval(interval);
+      res.end();
+    }
+  }, 200); // 每200毫秒推送一次
+
+  // 客户端断开连接时清理
+  req.on('close', () => {
+    clearInterval(interval);
+  });
 }
 
 async function handleBatchQrCodes(req, res, context, searchParams) {
@@ -1269,6 +1459,7 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
 
   const batchId = readPositiveInteger(searchParams.get('batchId'));
   const type = normalizeQrType(searchParams.get('type')) || 'url';
+  const progressId = searchParams.get('progressId') || null;
 
   if (!batchId) {
     throw new HttpError(400, '缺少批次ID');
@@ -1284,6 +1475,16 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
     throw new HttpError(404, '该批次没有吊牌');
   }
 
+  // 初始化进度跟踪
+  if (progressId) {
+    updateProgress(progressId, {
+      status: 'processing',
+      total: garments.length,
+      current: 0,
+      message: '正在生成二维码...'
+    });
+  }
+
   // 检查微信小程序码配置
   const hasValidWechatConfig =
     context.config.wechatAppId &&
@@ -1294,6 +1495,9 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
     context.config.wechatAppSecret.trim() !== '';
 
   if ((type === 'mini-program' || type === 'mini-program-square') && !hasValidWechatConfig) {
+    if (progressId) {
+      failProgress(progressId, '微信小程序配置缺失，无法生成小程序码');
+    }
     throw new HttpError(400, '微信小程序配置缺失，无法生成小程序码');
   }
 
@@ -1314,6 +1518,9 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
   // 错误处理
   zip.on('error', (err) => {
     console.error('ZIP creation error:', err);
+    if (progressId) {
+      failProgress(progressId, 'ZIP文件生成失败');
+    }
     if (!res.headersSent) {
       sendJson(req, res, context.config, 500, { message: 'ZIP文件生成失败' });
     }
@@ -1336,12 +1543,16 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
           accessToken = tokenResult.accessToken;
         }
       } catch (error) {
+        if (progressId) {
+          failProgress(progressId, '获取微信access_token失败');
+        }
         throw new HttpError(502, '获取微信access_token失败');
       }
     }
 
     // 逐个生成二维码并添加到ZIP
-    for (const garment of garments) {
+    for (let i = 0; i < garments.length; i++) {
+      const garment = garments[i];
       const sn = garment.sn;
       let qrBuffer;
 
@@ -1406,14 +1617,34 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
         });
       }
 
+      // 保存到缓存（同步操作，不阻塞 ZIP 流）
+      try {
+        setQrCode(sn, type, qrBuffer, context.config.qrCacheDir);
+      } catch (err) {
+        console.error(`缓存二维码 ${sn} 失败:`, err.message);
+      }
+
       // 添加到ZIP
       zip.append(qrBuffer, { name: `${sn}.png` });
+
+      // 更新进度
+      if (progressId) {
+        incrementProgress(progressId, 1);
+      }
     }
 
     // 完成ZIP
     zip.finalize();
+
+    // 标记进度完成
+    if (progressId) {
+      completeProgress(progressId, 'ZIP文件生成完成');
+    }
   } catch (error) {
     console.error('Batch QR code generation error:', error);
+    if (progressId) {
+      failProgress(progressId, error.message || '批量生成二维码失败');
+    }
     if (!res.headersSent) {
       sendJson(req, res, context.config, 500, { message: error.message || '批量生成二维码失败' });
     } else {
@@ -1431,10 +1662,23 @@ async function route(req, res, context) {
     return;
   }
 
+  // API全局限流（排除健康检查、静态资源和进度API）
+  if (pathname.startsWith('/api/') && !pathname.startsWith('/api/progress/')) {
+    const clientId = getClientId(req);
+    const rateLimitResult = apiRateLimit.check(clientId);
+    if (!rateLimitResult.allowed) {
+      sendJson(req, res, context.config, 429, {
+        message: '请求过于频繁，请稍后再试'
+      });
+      return;
+    }
+  }
+
   if (req.method === 'GET' && pathname === '/api/health') {
     sendJson(req, res, context.config, 200, {
       ok: true,
-      database: context.config.databasePath
+      status: 'healthy',
+      timestamp: new Date().toISOString()
     });
     return;
   }
@@ -1639,6 +1883,123 @@ async function route(req, res, context) {
 
   if (garmentSn && req.method === 'DELETE') {
     handleDeleteGarment(req, res, context, garmentSn, searchParams);
+    return;
+  }
+
+  // 二维码缓存管理接口（仅管理员）
+  if (pathname === '/api/admin/qrcode/cache/stats' && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const stats = getCacheStats(context.config.qrCacheDir);
+    const memoryInfo = getMemoryCacheInfo();
+    sendJson(req, res, context.config, 200, {
+      memory: {
+        ...stats.memory,
+        entries: memoryInfo.entries
+      },
+      file: stats.file,
+      ttl: {
+        memory: `${MEMORY_CACHE_TTL / 1000 / 60}分钟`,
+        browser: '1天'
+      }
+    });
+    return;
+  }
+
+  if (pathname === '/api/admin/qrcode/cache/clear' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    clearAll(context.config.qrCacheDir);
+    sendJson(req, res, context.config, 200, { message: '缓存已清空' });
+    return;
+  }
+
+  if (pathname === '/api/admin/qrcode/cache/cleanup' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const cleaned = cleanupMemoryCache();
+    sendJson(req, res, context.config, 200, {
+      message: '内存缓存已清理',
+      cleaned
+    });
+    return;
+  }
+
+  // 批量检查缓存状态
+  if (pathname === '/api/admin/qrcode/cache/check-batch' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const body = await readJson(req);
+    const sns = body.sns || [];
+    const type = normalizeQrType(body.type) || 'url';
+
+    if (!Array.isArray(sns) || sns.length === 0) {
+      throw new HttpError(400, '请提供 SN 列表');
+    }
+
+    if (sns.length > 10000) {
+      throw new HttpError(400, '单次最多检查 10000 个 SN');
+    }
+
+    const result = checkCacheBatch(context.db, sns, type);
+    sendJson(req, res, context.config, 200, result);
+    return;
+  }
+
+  // 获取缓存列表
+  if (pathname === '/api/admin/qrcode/cache/list' && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const limit = readPositiveInteger(searchParams.get('limit')) || 100;
+    const offset = readPositiveInteger(searchParams.get('offset')) || 0;
+    const type = searchParams.get('type') || null;
+    const snLike = searchParams.get('snLike') || null;
+
+    const list = getCacheList(context.db, { limit, offset, type, snLike });
+    const stats = getCacheStatistics(context.db);
+
+    sendJson(req, res, context.config, 200, {
+      list,
+      pagination: { limit, offset, total: stats.totalCount },
+      stats
+    });
+    return;
+  }
+
+  // 获取缓存统计
+  if (pathname === '/api/admin/qrcode/cache/statistics' && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const stats = getCacheStatistics(context.db);
+    sendJson(req, res, context.config, 200, stats);
+    return;
+  }
+
+  // 进度管理接口
+  if (pathname === '/api/progress/create' && req.method === 'POST') {
+    requireAdmin(req, context.config);
+    const body = await readJson(req);
+    const total = readPositiveInteger(body.total) || 0;
+    const progressId = createProgress(total);
+    sendJson(req, res, context.config, 200, { progressId, total });
+    return;
+  }
+
+  if (pathname.startsWith('/api/progress/') && req.method === 'GET') {
+    requireAdmin(req, context.config);
+    const progressId = pathname.slice('/api/progress/'.length);
+    if (!progressId) {
+      throw new HttpError(400, '缺少进度ID');
+    }
+
+    // 检查是否为 SSE 请求
+    const acceptHeader = req.headers.accept || '';
+    if (acceptHeader.includes('text/event-stream')) {
+      // SSE 端点
+      handleProgressSse(req, res, progressId);
+      return;
+    }
+
+    // 普通 JSON 请求
+    const progress = getProgress(progressId);
+    if (!progress) {
+      throw new HttpError(404, '进度任务不存在');
+    }
+    sendJson(req, res, context.config, 200, progress);
     return;
   }
 

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './auth.js';
+import { initCacheMetadata, migrateFileCacheToMetadata } from './cacheService.js';
 
 export const CLOTHING_FIELD_MAP = {
   productName: 'product_name',
@@ -289,6 +290,12 @@ export function migrateDatabase(db, config) {
   backfillThreeLayerData(db);
   ensureBindingLogsActorTypeColumn(db);
   ensureLostReportsColumns(db);
+
+  // 初始化缓存元数据表
+  initCacheMetadata(db);
+
+  // 迁移现有文件缓存到元数据表
+  migrateFileCacheToMetadata(db, config.qrCacheDir);
 }
 
 function ensureGarmentColumn(db, columnName) {

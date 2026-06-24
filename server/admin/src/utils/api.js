@@ -252,9 +252,136 @@ export function qrcodeUrl(sn, type = QRCODE_MODE_URL) {
   return `${absoluteApiBaseUrl()}/api/qrcode/${encodeURIComponent(sn)}?type=${encodeURIComponent(type)}`;
 }
 
-export async function downloadBatchQrCodes(batchId, type = QRCODE_MODE_URL) {
+/**
+ * 验证二维码是否在服务器上缓存（单个）
+ * 通过 HEAD 请求检查文件是否存在
+ */
+export async function verifyQrCache(sn, type = QRCODE_MODE_URL) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const url = `${absoluteApiBaseUrl()}/api/qrcode/${encodeURIComponent(sn)}?type=${encodeURIComponent(type)}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+
+    // 200 表示文件存在（有缓存），404 表示不存在
+    return response.ok;
+  } catch (error) {
+    console.error('验证缓存失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 批量检查缓存状态（推荐使用）
+ * @param {Array} sns - SN 列表
+ * @param {string} type - 二维码类型
+ * @returns {Promise<Object>} { cached: string[], uncached: string[] }
+ */
+export async function checkQrCacheBatch(sns, type = QRCODE_MODE_URL) {
+  return request('/api/admin/qrcode/cache/check-batch', {
+    method: 'POST',
+    data: { sns, type }
+  });
+}
+
+/**
+ * 获取缓存列表
+ */
+export async function getQrCacheList(options = {}) {
+  const params = [];
+  if (options.limit) params.push(`limit=${options.limit}`);
+  if (options.offset) params.push(`offset=${options.offset}`);
+  if (options.type) params.push(`type=${encodeURIComponent(options.type)}`);
+  if (options.snLike) params.push(`snLike=${encodeURIComponent(options.snLike)}`);
+
+  const suffix = params.length ? `?${params.join('&')}` : '';
+  return request(`/api/admin/qrcode/cache/list${suffix}`);
+}
+
+/**
+ * 获取缓存统计
+ */
+export async function getQrCacheStatistics() {
+  return request('/api/admin/qrcode/cache/statistics');
+}
+
+/**
+ * 创建进度任务
+ */
+export async function createProgress(total = 0) {
+  return request('/api/progress/create', {
+    method: 'POST',
+    data: { total }
+  });
+}
+
+/**
+ * 获取进度状态
+ */
+export async function getProgressStatus(progressId) {
+  return request(`/api/progress/${encodeURIComponent(progressId)}`);
+}
+
+/**
+ * 轮询监听进度
+ * @param {string} progressId - 进度ID
+ * @param {Function} onProgress - 进度回调函数
+ * @param {number} interval - 轮询间隔（毫秒）
+ * @returns {Function} 取消轮询的函数
+ */
+export function pollProgress(progressId, onProgress, interval = 3000) {
+  let active = true;
+  let timeoutId = null;
+
+  const poll = async () => {
+    if (!active) return;
+
+    try {
+      const progress = await getProgressStatus(progressId);
+
+      if (progress) {
+        onProgress(progress);
+
+        // 如果完成或失败，停止轮询
+        if (progress.status === 'completed' || progress.status === 'failed') {
+          active = false;
+          return;
+        }
+      }
+
+      // 继续轮询
+      if (active) {
+        timeoutId = setTimeout(poll, interval);
+      }
+    } catch (error) {
+      console.error('获取进度失败:', error);
+      // 出错时停止轮询
+      active = false;
+      onProgress({ status: 'failed', message: '获取进度失败' });
+    }
+  };
+
+  // 开始轮询
+  poll();
+
+  // 返回取消轮询的函数
+  return () => {
+    active = false;
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  };
+}
+
+export async function downloadBatchQrCodes(batchId, type = QRCODE_MODE_URL, progressId = null) {
   const token = localStorage.getItem(TOKEN_KEY);
   const params = new URLSearchParams({ batchId: String(batchId), type });
+  if (progressId) {
+    params.set('progressId', progressId);
+  }
   const response = await fetch(`${API_BASE_URL}/api/qrcode/batch?${params}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   });

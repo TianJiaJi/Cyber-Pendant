@@ -306,26 +306,51 @@ function blobToBase64(blob) {
 }
 
 /**
- * 检查批量缓存状态
+ * 检查批量缓存状态（使用服务器批量验证）
  * @param {Array} garments - SN列表
  * @param {string} type - 二维码类型
+ * @param {Function} batchCheckFn - 批量检查函数（可选）
  * @returns {Promise<Object>} { cached: Set, uncached: Set }
  */
-async function checkCacheStatus(garments, type = 'url') {
+async function checkCacheStatus(garments, type = 'url', batchCheckFn = null) {
   const cached = new Set();
   const uncached = new Set();
 
-  await Promise.all(
-    garments.map(async (garment) => {
-      const sn = typeof garment === 'string' ? garment : garment.sn;
-      const data = await getQrCode(sn, type);
-      if (data) {
-        cached.add(sn);
-      } else {
-        uncached.add(sn);
+  if (batchCheckFn) {
+    // 使用批量检查接口（高效）
+    const sns = garments.map(g => typeof g === 'string' ? g : g.sn);
+    try {
+      const result = await batchCheckFn(sns, type);
+      // 结果是 { cached: string[], uncached: string[] }
+      if (result && Array.isArray(result.cached)) {
+        result.cached.forEach(sn => cached.add(sn));
       }
-    })
-  );
+      if (result && Array.isArray(result.uncached)) {
+        result.uncached.forEach(sn => uncached.add(sn));
+      }
+    } catch (error) {
+      console.error('批量检查缓存失败:', error);
+      // 失败时回退到逐个检查本地缓存
+      await fallbackCheckCache();
+    }
+  } else {
+    // 回退到逐个检查本地缓存
+    await fallbackCheckCache();
+  }
+
+  async function fallbackCheckCache() {
+    await Promise.all(
+      garments.map(async (garment) => {
+        const sn = typeof garment === 'string' ? garment : garment.sn;
+        const localData = await getQrCode(sn, type);
+        if (localData) {
+          cached.add(sn);
+        } else {
+          uncached.add(sn);
+        }
+      })
+    );
+  }
 
   return { cached, uncached };
 }

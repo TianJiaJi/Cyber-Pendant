@@ -99,9 +99,19 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch, onUnmounted } from 'vue';
 import { checkCacheStatus, getOrDownloadQrCode } from '../utils/qrCache.js';
-import { qrcodeUrl, QRCODE_MODE_URL, QRCODE_MODE_MINIPROGRAM, QRCODE_MODE_MINIPROGRAM_SQUARE, QRCODE_MODE_SN } from '../utils/api.js';
+import {
+  qrcodeUrl,
+  downloadBatchQrCodes,
+  createProgress,
+  pollProgress,
+  checkQrCacheBatch,
+  QRCODE_MODE_URL,
+  QRCODE_MODE_MINIPROGRAM,
+  QRCODE_MODE_MINIPROGRAM_SQUARE,
+  QRCODE_MODE_SN
+} from '../utils/api.js';
 import ExcelJS from 'exceljs';
 
 const props = defineProps({
@@ -178,8 +188,14 @@ const progressPercent = computed(() => {
 });
 
 const progressText = computed(() => {
-  if (progressTotal.value === 0) return '准备中...';
-  return `正在处理 ${progressCurrent.value} / ${progressTotal.value}`;
+  if (progressTotal.value === 0) {
+    return '准备中...';
+  }
+  // 如果已完成
+  if (progressCurrent.value >= progressTotal.value) {
+    return '下载完成';
+  }
+  return `正在生成二维码 ${progressCurrent.value} / ${progressTotal.value}`;
 });
 
 const exportButtonText = computed(() => {
@@ -220,11 +236,21 @@ async function updateCacheStatus() {
   const type = props.qrMode;
 
   if (selectedFormat.value === 'zip' || (selectedFormat.value === 'excel' && includeQrImages.value)) {
-    const status = await checkCacheStatus(garments, type);
-    cacheStatus.value = {
-      cachedCount: status.cached.size,
-      uncachedCount: status.uncached.size
-    };
+    // 使用批量检查接口（一次性检查所有 SN）
+    try {
+      const status = await checkCacheStatus(garments, type, checkQrCacheBatch);
+      cacheStatus.value = {
+        cachedCount: status.cached.size,
+        uncachedCount: status.uncached.size
+      };
+    } catch (error) {
+      console.error('检查缓存状态失败:', error);
+      // 失败时显示全部未缓存
+      cacheStatus.value = {
+        cachedCount: 0,
+        uncachedCount: garments.length
+      };
+    }
   } else {
     cacheStatus.value = { cachedCount: 0, uncachedCount: 0 };
   }
@@ -299,6 +325,9 @@ async function exportExcel(garments) {
   for (let i = 0; i < garments.length; i++) {
     const record = garments[i];
     progressCurrent.value = i + 1;
+
+    // 确保进度条更新（每处理一条就让 Vue 渲染一次）
+    await nextTick();
 
     const clothingName = props.clothing?.productName || record.productName || '';
     const standard = formatStandard(props.clothing?.standard || record.standard || '');
@@ -424,9 +453,47 @@ async function exportCsv(garments) {
 }
 
 async function exportZip(garments) {
-  // 调用API下载ZIP
-  const { downloadBatchQrCodes } = await import('../utils/api.js');
-  await downloadBatchQrCodes(props.batch.id, props.qrMode);
+  let unsubscribeProgress = null;
+
+  try {
+    // 1. 创建进度任务
+    const progressResult = await createProgress(garments.length);
+    const progressId = progressResult.progressId;
+    const total = progressResult.total;
+
+    // 2. 设置初始进度
+    progressTotal.value = total;
+    progressCurrent.value = 0;
+
+    // 3. 开始轮询进度更新
+    unsubscribeProgress = pollProgress(progressId, (progress) => {
+      progressCurrent.value = progress.current;
+      progressTotal.value = progress.total;
+
+      if (progress.status === 'completed') {
+        // 进度完成，稍后关闭弹窗
+        emit('export-complete', { format: 'zip' });
+        setTimeout(() => close(), 1500);
+      } else if (progress.status === 'failed') {
+        errorMessage.value = progress.message || '导出失败';
+        emit('export-error', new Error(progress.message));
+      }
+    });
+
+    // 4. 开始下载（传入 progressId）
+    await downloadBatchQrCodes(props.batch.id, props.qrMode, progressId);
+
+  } catch (error) {
+    console.error('ZIP下载失败:', error);
+    errorMessage.value = error.message || '下载失败，请重试';
+    emit('export-error', error);
+    throw error;
+  } finally {
+    // 清理进度订阅
+    if (unsubscribeProgress) {
+      unsubscribeProgress();
+    }
+  }
 }
 
 function formatStandard(value) {

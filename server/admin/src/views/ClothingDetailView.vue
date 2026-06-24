@@ -134,7 +134,7 @@
           </div>
 
           <div class="helper-strip">
-            至少填写款号、颜色、尺码或批次标签之一；单次最多生成 500 个 SN。
+            至少填写款号、颜色、尺码或批次标签之一；单次最多生成 10000 个 SN。
           </div>
 
           <div class="form-grid">

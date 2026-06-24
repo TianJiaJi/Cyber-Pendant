@@ -12,7 +12,8 @@ async function startTestServer(options = {}) {
     databasePath: options.databasePath || path.join(dir, 'test.sqlite'),
     adminUsername: 'admin',
     adminPassword: 'secret123',
-    tokenSecret: 'test-secret',
+    tokenSecret: 'test-secret-with-more-than-32-chars-for-test!!',
+    isTest: true,
     frontendBaseUrl: 'http://localhost:5173',
     ...options
   });

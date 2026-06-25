@@ -181,10 +181,6 @@ export function createConfig(overrides = {}) {
       overrides.databasePath || env.DATABASE_PATH,
       path.join(projectDir, 'data', 'cyber-pendant.sqlite')
     ),
-    qrCacheDir: resolveProjectPath(
-      overrides.qrCacheDir || env.QR_CACHE_DIR,
-      path.join(projectDir, 'data', 'qrcodes')
-    ),
     frontendBaseUrl:
       overrides.frontendBaseUrl || env.FRONTEND_BASE_URL || 'http://localhost:5173',
     adminBasePath: normalizeBasePath(

@@ -25,14 +25,28 @@ import {
 } from './security.js';
 import {
   cleanupMemoryCache,
-  deleteQrCode,
+  deleteQrCode as deleteQrCache,
   getCacheKey,
   getCacheStats,
   getMemoryCacheInfo,
   getQrCode,
+  getCacheFilePath,
   MEMORY_CACHE_TTL,
   setQrCode
 } from './qrCache.js';
+import {
+  checkCacheBatch,
+  checkCacheExists,
+  checkCacheHealth,
+  checkCacheExistsByMetadata,
+  deleteCacheMetadata,
+  getCacheList,
+  getCacheStatistics,
+  initCacheMetadata,
+  repairCacheMetadata,
+  saveCacheMetadata,
+  updateCacheAccessTime
+} from './cacheService.js';
 import {
   completeProgress,
   createProgress,
@@ -96,11 +110,7 @@ import {
   updateUserLastLogin,
   createUser,
   validateBatchForCreate,
-  validateClothingForCreate,
-  checkQrCacheBatch,
-  deleteQrCache,
-  getQrCacheStats,
-  listQrCache
+  validateClothingForCreate
 } from './db.js';
 import { generateUniqueSn, normalizeSn } from './sn.js';
 
@@ -1257,9 +1267,10 @@ async function handleQrCode(req, res, context, sn, searchParams) {
   }
 
   const type = normalizeQrType(searchParams.get('type'));
+  const cacheDir = context.config.qrCacheDir;
 
   // 先尝试从缓存获取
-  const cached = await getQrCode(context.db, sn, type);
+  const cached = getQrCode(sn, type, cacheDir);
   if (cached) {
     console.log(`[QR Cache] HIT: ${sn} (${type})`);
     setCorsHeaders(req, res, context.config);
@@ -1340,7 +1351,15 @@ async function handleQrCode(req, res, context, sn, searchParams) {
     }
 
     // 保存到缓存
-    await setQrCode(context.db, sn, type, qrImage);
+    setQrCode(sn, type, qrImage, cacheDir);
+
+    // 同时保存元数据到数据库
+    try {
+      const filePath = getCacheFilePath(sn, type, cacheDir);
+      saveCacheMetadata(context.db, sn, type, filePath, qrImage.length);
+    } catch (err) {
+      console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+    }
 
     console.log(`[QR Cache] SAVED: ${sn} (${type})`);
 
@@ -1413,7 +1432,15 @@ async function handleQrCode(req, res, context, sn, searchParams) {
     }
 
     // 保存到缓存
-    await setQrCode(context.db, sn, type, qrImage);
+    setQrCode(sn, type, qrImage, cacheDir);
+
+    // 同时保存元数据到数据库
+    try {
+      const filePath = getCacheFilePath(sn, type, cacheDir);
+      saveCacheMetadata(context.db, sn, type, filePath, qrImage.length);
+    } catch (err) {
+      console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+    }
 
     console.log(`[QR Cache] SAVED: ${sn} (${type})`);
 
@@ -1440,7 +1467,7 @@ async function handleQrCode(req, res, context, sn, searchParams) {
   });
 
   // 保存到缓存
-  await setQrCode(context.db, sn, type, qrImage);
+  setQrCode(sn, type, qrImage, cacheDir);
 
   setCorsHeaders(req, res, context.config);
   res.writeHead(200, {
@@ -1607,7 +1634,7 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
       let qrBuffer;
 
       // 先尝试从缓存获取
-      const cached = await getQrCode(context.db, sn, type);
+      const cached = getQrCode(sn, type, context.config.qrCacheDir);
       if (cached) {
         console.log(`[ZIP Export] Cache HIT: ${sn} (${type})`);
         qrBuffer = cached;
@@ -1675,11 +1702,20 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
           });
         }
 
-        // 保存到缓存（异步操作，不阻塞 ZIP 流）
-        setQrCode(context.db, sn, type, qrBuffer).catch((err) => {
+        // 保存到缓存（同步操作，不阻塞 ZIP 流）
+        try {
+          setQrCode(sn, type, qrBuffer, context.config.qrCacheDir);
+          // 同时保存元数据
+          try {
+            const filePath = getCacheFilePath(sn, type, context.config.qrCacheDir);
+            saveCacheMetadata(context.db, sn, type, filePath, qrBuffer.length);
+          } catch (err) {
+            console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+          }
+          console.log(`[ZIP Export] Cached: ${sn} (${type})`);
+        } catch (err) {
           console.error(`缓存二维码 ${sn} 失败:`, err.message);
-        });
-        console.log(`[ZIP Export] Cached: ${sn} (${type})`);
+        }
       }
 
       // 添加到ZIP
@@ -1814,15 +1850,23 @@ async function handleExcelExportWithQrCodes(req, res, context) {
  * 获取或生成二维码
  */
 async function getOrGenerateQrCode(context, sn, type) {
+  const cacheDir = context.config.qrCacheDir;
+
   // 先尝试从缓存获取
-  let qrBuffer = await getQrCode(context.db, sn, type);
+  let qrBuffer = getQrCode(sn, type, cacheDir);
 
   if (!qrBuffer) {
     // 缓存未命中，生成二维码
     qrBuffer = await generateQrCodeImpl(context, sn, type);
     // 保存到缓存
     if (qrBuffer) {
-      await setQrCode(context.db, sn, type, qrBuffer);
+      setQrCode(sn, type, qrBuffer, cacheDir);
+      try {
+        const filePath = getCacheFilePath(sn, type, cacheDir);
+        saveCacheMetadata(context.db, sn, type, filePath, qrBuffer.length);
+      } catch (err) {
+        console.error(`保存缓存元数据失败 [${sn}]:`, err.message);
+      }
     }
   }
 
@@ -2223,14 +2267,14 @@ async function route(req, res, context) {
   // 二维码缓存管理接口（仅管理员）
   if (pathname === '/api/admin/qrcode/cache/stats' && req.method === 'GET') {
     requireAdmin(req, context);
-    const stats = await getCacheStats(context.db);
+    const stats = getCacheStats(context.config.qrCacheDir);
     const memoryInfo = getMemoryCacheInfo();
     sendJson(req, res, context.config, 200, {
       memory: {
         ...stats.memory,
         entries: memoryInfo.entries
       },
-      database: stats.database,
+      file: stats.file,
       ttl: {
         memory: `${MEMORY_CACHE_TTL / 1000 / 60}分钟`,
         browser: '1天'
@@ -2241,7 +2285,7 @@ async function route(req, res, context) {
 
   if (pathname === '/api/admin/qrcode/cache/clear' && req.method === 'POST') {
     requireAdmin(req, context);
-    await clearAll(context.db);
+    clearAll(context.config.qrCacheDir);
     sendJson(req, res, context.config, 200, { message: '缓存已清空' });
     return;
   }
@@ -2271,8 +2315,32 @@ async function route(req, res, context) {
       throw new HttpError(400, '单次最多检查 10000 个 SN');
     }
 
-    const result = checkQrCacheBatch(context.db, sns, type);
+    const result = checkCacheBatch(context.db, sns, type, context.config.qrCacheDir);
     sendJson(req, res, context.config, 200, result);
+    return;
+  }
+
+  // 修复缓存元数据
+  if (pathname === '/api/admin/qrcode/cache/repair' && req.method === 'POST') {
+    requireAdmin(req, context);
+    const result = repairCacheMetadata(context.db, context.config.qrCacheDir);
+    sendJson(req, res, context.config, 200, result);
+    return;
+  }
+
+  // 检查缓存健康状态
+  if (pathname === '/api/admin/qrcode/cache/health' && req.method === 'POST') {
+    requireAdmin(req, context);
+    const body = await readJson(req);
+    const sns = body.sns || [];
+    const type = normalizeQrType(body.type) || 'url';
+
+    if (!Array.isArray(sns) || sns.length === 0) {
+      throw new HttpError(400, '请提供 SN 列表');
+    }
+
+    const health = checkCacheHealth(context.db, sns, type, context.config.qrCacheDir);
+    sendJson(req, res, context.config, 200, health);
     return;
   }
 
@@ -2288,7 +2356,9 @@ async function route(req, res, context) {
     }
 
     // 删除缓存
-    await deleteQrCode(context.db, sn, type);
+    deleteQrCache(sn, type, context.config.qrCacheDir);
+    // 删除元数据
+    deleteCacheMetadata(context.db, sn, type);
 
     sendJson(req, res, context.config, 200, { message: '缓存已删除' });
     return;
@@ -2302,8 +2372,8 @@ async function route(req, res, context) {
     const type = searchParams.get('type') || null;
     const snLike = searchParams.get('snLike') || null;
 
-    const list = listQrCache(context.db, { limit, offset, type, snLike });
-    const stats = getQrCacheStats(context.db);
+    const list = getCacheList(context.db, { limit, offset, type, snLike });
+    const stats = getCacheStatistics(context.db);
 
     sendJson(req, res, context.config, 200, {
       list,
@@ -2316,7 +2386,7 @@ async function route(req, res, context) {
   // 获取缓存统计
   if (pathname === '/api/admin/qrcode/cache/statistics' && req.method === 'GET') {
     requireAdmin(req, context);
-    const stats = getQrCacheStats(context.db);
+    const stats = getCacheStatistics(context.db);
     sendJson(req, res, context.config, 200, stats);
     return;
   }

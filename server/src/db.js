@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './auth.js';
+import { initCacheMetadata, migrateFileCacheToMetadata } from './cacheService.js';
 
 export const CLOTHING_FIELD_MAP = {
   productName: 'product_name',
@@ -295,21 +296,6 @@ export function migrateDatabase(db, config) {
     CREATE INDEX IF NOT EXISTS idx_lost_reports_reporter ON lost_reports(reporter_id);
     CREATE INDEX IF NOT EXISTS idx_lost_reports_status ON lost_reports(status);
     CREATE INDEX IF NOT EXISTS idx_contact_reveal_logs_garment ON contact_reveal_logs(garment_id);
-
-    CREATE TABLE IF NOT EXISTS qr_cache (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sn TEXT NOT NULL,
-      type TEXT NOT NULL,
-      data MEDIUMBLOB NOT NULL,
-      created_at INTEGER NOT NULL,
-      accessed_at INTEGER,
-      access_count INTEGER DEFAULT 0,
-      size INTEGER NOT NULL,
-      UNIQUE(sn, type)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_qr_cache_accessed ON qr_cache(accessed_at);
-    CREATE INDEX IF NOT EXISTS idx_qr_cache_created ON qr_cache(created_at);
   `);
 
   ensureGarmentColumn(db, 'clothing_id');
@@ -336,6 +322,11 @@ export function migrateDatabase(db, config) {
   ensureBindingLogsActorTypeColumn(db);
   ensureLostReportsColumns(db);
 
+  // 初始化缓存元数据表
+  initCacheMetadata(db);
+
+  // 迁移现有文件缓存到元数据表
+  migrateFileCacheToMetadata(db, config.qrCacheDir);
 }
 
 function ensureGarmentColumn(db, columnName) {
@@ -1953,199 +1944,4 @@ function backfillThreeLayerData(db) {
     const batch = getOrCreateBatchForLegacy(db, row, style, clothing.id);
     update.run(clothing.id, batch.id, nowIso(), row.id);
   }
-}
-
-/**
- * ===================
- * 二维码缓存 CRUD
- * ===================
- */
-
-/**
- * 获取二维码缓存
- * @param {DatabaseSync} db - 数据库实例
- * @param {string} sn - SN码
- * @param {string} type - 二维码类型
- * @returns {Buffer|null} 二进制数据或null
- */
-export function getQrCache(db, sn, type) {
-  const row = db
-    .prepare(
-      `SELECT data, accessed_at, access_count
-       FROM qr_cache
-       WHERE sn = ? AND type = ?
-       LIMIT 1`
-    )
-    .get(sn, type);
-
-  if (!row) {
-    return null;
-  }
-
-  // 更新访问时间和次数
-  const now = Date.now();
-  db.prepare(
-    `UPDATE qr_cache
-     SET accessed_at = ?, access_count = ?
-     WHERE sn = ? AND type = ?`
-  ).run(now, (row.access_count || 0) + 1, sn, type);
-
-  return row.data;
-}
-
-/**
- * 保存二维码缓存
- * @param {DatabaseSync} db - 数据库实例
- * @param {string} sn - SN码
- * @param {string} type - 二维码类型
- * @param {Buffer} data - 二进制数据
- * @returns {boolean} 是否成功
- */
-export function setQrCache(db, sn, type, data) {
-  const now = Date.now();
-  const size = data ? data.length : 0;
-
-  const stmt = db.prepare(
-    `INSERT INTO qr_cache (sn, type, data, created_at, accessed_at, access_count, size)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(sn, type) DO UPDATE SET
-       data = excluded.data,
-       accessed_at = excluded.accessed_at,
-       access_count = access_count + 1,
-       size = excluded.size`
-  );
-
-  try {
-    stmt.run(sn, type, data, now, now, 1, size);
-    return true;
-  } catch (error) {
-    console.error(`保存二维码缓存失败 [${sn}/${type}]:`, error.message);
-    return false;
-  }
-}
-
-/**
- * 删除二维码缓存
- * @param {DatabaseSync} db - 数据库实例
- * @param {string} sn - SN码
- * @param {string} type - 二维码类型
- * @returns {boolean} 是否删除成功
- */
-export function deleteQrCache(db, sn, type) {
-  const result = db
-    .prepare(`DELETE FROM qr_cache WHERE sn = ? AND type = ?`)
-    .run(sn, type);
-  return result.changes > 0;
-}
-
-/**
- * 清空所有二维码缓存
- * @param {DatabaseSync} db - 数据库实例
- * @returns {number} 删除数量
- */
-export function clearQrCache(db) {
-  const result = db.prepare(`DELETE FROM qr_cache`).run();
-  return result.changes;
-}
-
-/**
- * 清理过期的二维码缓存
- * @param {DatabaseSync} db - 数据库实例
- * @param {number} maxAge - 最大保留时间（毫秒），默认 7 天
- * @returns {number} 清理数量
- */
-export function cleanupExpiredQrCache(db, maxAge = 7 * 24 * 60 * 60 * 1000) {
-  const cutoffTime = Date.now() - maxAge;
-  const result = db
-    .prepare(`DELETE FROM qr_cache WHERE created_at < ?`)
-    .run(cutoffTime);
-  return result.changes;
-}
-
-/**
- * 获取二维码缓存统计信息
- * @param {DatabaseSync} db - 数据库实例
- * @returns {Object} 统计信息
- */
-export function getQrCacheStats(db) {
-  const totalStmt = db.prepare(`SELECT COUNT(*) as count, SUM(size) as total_size FROM qr_cache`);
-  const total = totalStmt.get();
-
-  const byTypeStmt = db.prepare(
-    `SELECT type, COUNT(*) as count, SUM(size) as total_size
-     FROM qr_cache
-     GROUP BY type`
-  );
-  const byType = byTypeStmt.all();
-
-  return {
-    totalCount: total.count || 0,
-    totalSize: total.total_size || 0,
-    totalSizeMB: ((total.total_size || 0) / 1024 / 1024).toFixed(2),
-    byType: byType.map((row) => ({
-      type: row.type,
-      count: row.count,
-      totalSize: row.total_size || 0,
-      totalSizeMB: ((row.total_size || 0) / 1024 / 1024).toFixed(2)
-    }))
-  };
-}
-
-/**
- * 获取二维码缓存列表
- * @param {DatabaseSync} db - 数据库实例
- * @param {Object} options - 查询选项
- * @returns {Array} 缓存列表
- */
-export function listQrCache(db, options = {}) {
-  const { limit = 100, offset = 0, type = null, snLike = null } = options;
-
-  let whereSql = '1=1';
-  const params = [];
-
-  if (type) {
-    whereSql += ' AND type = ?';
-    params.push(type);
-  }
-
-  if (snLike) {
-    whereSql += ' AND sn LIKE ?';
-    params.push(`%${snLike}%`);
-  }
-
-  const stmt = db.prepare(
-    `SELECT id, sn, type, size, created_at, accessed_at, access_count
-     FROM qr_cache
-     WHERE ${whereSql}
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`
-  );
-
-  return stmt.all(...params, limit, offset);
-}
-
-/**
- * 批量检查二维码缓存是否存在
- * @param {DatabaseSync} db - 数据库实例
- * @param {Array} sns - SN列表
- * @param {string} type - 二维码类型
- * @returns {Object} { cached: string[], uncached: string[] }
- */
-export function checkQrCacheBatch(db, sns, type) {
-  const cached = [];
-  const uncached = [];
-
-  const stmt = db.prepare(
-    `SELECT sn FROM qr_cache WHERE sn = ? AND type = ? LIMIT 1`
-  );
-
-  for (const sn of sns) {
-    if (stmt.get(sn, type)) {
-      cached.push(sn);
-    } else {
-      uncached.push(sn);
-    }
-  }
-
-  return { cached, uncached };
 }

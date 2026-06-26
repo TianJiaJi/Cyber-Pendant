@@ -266,6 +266,36 @@ function normalizeQrType(value) {
   return 'url';
 }
 
+/**
+ * 生成安全的 ZIP 文件名
+ *
+ * 防御路径遍历攻击：移除或替换所有可能被用于路径遍历的字符
+ * 这是一个防御性安全措施，即使 SN 已经通过 normalizeSn() 验证
+ *
+ * @param {string} sn - SN 码
+ * @returns {string} 安全的文件名
+ */
+function safeZipFileName(sn) {
+  // 移除所有路径分隔符和点序列
+  // Windows 路径分隔符: \ 和 /
+  // Unix 路径分隔符: /
+  // 路径遍历序列: .. 和 ...
+  let safe = sn.replace(/[..\\/]/g, '_');
+
+  // 移除控制字符
+  safe = safe.replace(/[\x00-\x1f\x80-\x9f]/g, '_');
+
+  // 移除 Windows 保留字符 (<>:"|?*)
+  safe = safe.replace(/[<>:"|?*]/g, '_');
+
+  // 确保文件名不为空
+  if (!safe) {
+    safe = 'invalid_sn';
+  }
+
+  return `${safe}.png`;
+}
+
 function parsePathSn(pathname, prefix) {
   if (!pathname.startsWith(prefix)) {
     return null;
@@ -1682,8 +1712,8 @@ async function handleBatchQrCodes(req, res, context, searchParams) {
         console.log(`[ZIP Export] Cached: ${sn} (${type})`);
       }
 
-      // 添加到ZIP
-      zip.append(qrBuffer, { name: `${sn}.png` });
+      // 添加到ZIP（使用安全的文件名）
+      zip.append(qrBuffer, { name: safeZipFileName(sn) });
 
       // 更新进度
       if (progressId) {

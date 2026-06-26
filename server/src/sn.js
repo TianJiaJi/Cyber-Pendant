@@ -32,6 +32,31 @@ export function generateUniqueSn(db) {
   throw new Error('Unable to generate a unique SN code.');
 }
 
+/**
+ * 路径遍历危险字符模式
+ * 用于检测和阻止包含路径遍历攻击的 SN
+ */
+const PATH_TRAVERSAL_PATTERN = /[..\\/]/;
+
+/**
+ * 标准化 SN 码
+ *
+ * 安全注意事项：
+ * - 拒绝包含路径遍历字符的输入（.., /, \）
+ * - 这可以防止在文件操作中使用恶意 SN 进行路径遍历攻击
+ * - 例如：ZIP 导出时将 SN 作为文件名的情况
+ *
+ * @param {*} value - 要标准化的 SN 值
+ * @returns {string} 标准化后的 SN，如果包含危险字符则抛出错误
+ * @throws {Error} 如果 SN 包含路径遍历字符
+ */
 export function normalizeSn(value) {
-  return String(value || '').trim().toUpperCase();
+  const sn = String(value || '').trim().toUpperCase();
+
+  // 安全检查：拒绝路径遍历字符
+  if (PATH_TRAVERSAL_PATTERN.test(sn)) {
+    throw new Error('SN 包含非法字符（路径遍历字符）');
+  }
+
+  return sn;
 }

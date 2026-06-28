@@ -117,34 +117,3 @@ export function getProgress(progressId) {
 export function deleteProgress(progressId) {
   progressStore.delete(progressId);
 }
-
-// 清理过期进度的周期（1小时）
-const CLEANUP_INTERVAL = 60 * 60 * 1000;
-const PROGRESS_TTL = 60 * 60 * 1000; // 进度任务保留1小时
-
-/**
- * 清理过期的进度任务（超过1小时）
- */
-export function cleanupOldProgress() {
-  const now = Date.now();
-
-  for (const [id, entry] of progressStore.entries()) {
-    if (now - entry.timestamp > PROGRESS_TTL) {
-      progressStore.delete(id);
-    }
-  }
-}
-
-// 每小时清理一次过期进度
-setInterval(cleanupOldProgress, CLEANUP_INTERVAL);
-
-/**
- * 获取所有活跃进度任务（用于调试）
- * @returns {Array} 进度任务列表
- */
-export function getAllProgress() {
-  return Array.from(progressStore.entries()).map(([id, entry]) => ({
-    id,
-    ...entry
-  }));
-}

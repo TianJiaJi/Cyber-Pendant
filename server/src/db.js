@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './auth.js';
+import escapeHtml from 'escape-html';
 
 export const CLOTHING_FIELD_MAP = {
   productName: 'product_name',
@@ -63,7 +64,7 @@ function cleanString(value) {
 
 /**
  * 净化字符串，防止 XSS 攻击
- * 对 HTML 特殊字符进行实体编码
+ * 使用 escape-html 库进行 HTML 实体编码
  *
  * @param {*} value - 要净化的值
  * @returns {string|null} - 净化后的值
@@ -78,15 +79,8 @@ export function sanitizeString(value) {
     return null;
   }
 
-  // HTML 实体编码，防止 XSS 攻击
-  // 编码 OWASP 推荐的关键字符： < > " ' / `
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;');
+  // 使用escape-html库进行HTML实体编码，防止 XSS 攻击
+  return escapeHtml(text);
 }
 
 function cleanPositiveInteger(value) {
@@ -1990,7 +1984,9 @@ export function getQrCache(db, sn, type) {
      WHERE sn = ? AND type = ?`
   ).run(now, (row.access_count || 0) + 1, sn, type);
 
-  return row.data;
+  // 确保返回的是Buffer实例
+  const data = row.data;
+  return Buffer.isBuffer(data) ? data : Buffer.from(data);
 }
 
 /**

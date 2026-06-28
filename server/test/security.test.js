@@ -12,10 +12,10 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/api.js';
 import {
   createRateLimit,
-  validateSecretStrength,
   validatePasswordStrength,
   escapeCsvValue
 } from '../src/security.js';
+import { validateSecretStrength } from '../src/config.js';
 
 async function startTestServer(options = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'cyber-pendant-'));

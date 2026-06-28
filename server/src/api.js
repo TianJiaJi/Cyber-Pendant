@@ -38,7 +38,6 @@ import {
   createProgress,
   deleteProgress,
   failProgress,
-  getAllProgress,
   getProgress,
   incrementProgress,
   updateProgress
@@ -296,42 +295,37 @@ function safeZipFileName(sn) {
   return `${safe}.png`;
 }
 
-function parsePathSn(pathname, prefix) {
-  if (!pathname.startsWith(prefix)) {
-    return null;
-  }
+// 通用路径参数解析函数
+function parsePathParam(pathname, pattern, transform = v => v) {
+  const match = pathname.match(pattern);
+  if (!match) return null;
+  return transform(decodeURIComponent(match[1]));
+}
 
-  const value = pathname.slice(prefix.length);
+function parsePathSn(pathname, prefix) {
+  const value = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
   return value ? normalizeSn(decodeURIComponent(value)) : null;
 }
 
 function parsePathId(pathname, prefix) {
-  if (!pathname.startsWith(prefix)) {
-    return null;
-  }
-
-  const value = pathname.slice(prefix.length);
+  const value = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
   return /^\d+$/.test(value) ? Number(value) : null;
 }
 
 function parseClothingBatchesPath(pathname) {
-  const match = pathname.match(/^\/api\/clothes\/(\d+)\/batches$/);
-  return match ? Number(match[1]) : null;
+  return parsePathParam(pathname, /^\/api\/clothes\/(\d+)\/batches$/, Number);
 }
 
 function parseGarmentBindingPath(pathname) {
-  const match = pathname.match(/^\/api\/garments\/([^/]+)\/binding$/);
-  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+  return parsePathParam(pathname, /^\/api\/garments\/([^/]+)\/binding$/, normalizeSn);
 }
 
 function parseGarmentLostReportPath(pathname) {
-  const match = pathname.match(/^\/api\/garments\/([^/]+)\/report-lost$/);
-  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+  return parsePathParam(pathname, /^\/api\/garments\/([^/]+)\/report-lost$/, normalizeSn);
 }
 
 function parseGarmentContactRevealPath(pathname) {
-  const match = pathname.match(/^\/api\/garments\/([^/]+)\/contact-reveal$/);
-  return match ? normalizeSn(decodeURIComponent(match[1])) : null;
+  return parsePathParam(pathname, /^\/api\/garments\/([^/]+)\/contact-reveal$/, normalizeSn);
 }
 
 function readPositiveInteger(value) {

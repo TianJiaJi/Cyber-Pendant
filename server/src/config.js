@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const serverDir = path.resolve(srcDir, '..');
@@ -29,46 +29,6 @@ function booleanValue(value, fallback = false) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 }
 
-function stripEnvValue(value) {
-  const trimmed = value.trim();
-
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-
-  return trimmed;
-}
-
-function loadLocalEnv() {
-  const envPath = path.join(serverDir, '.env');
-
-  if (!existsSync(envPath)) {
-    return;
-  }
-
-  const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      continue;
-    }
-
-    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match) {
-      continue;
-    }
-
-    const [, key, value] = match;
-    if (process.env[key] === undefined) {
-      process.env[key] = stripEnvValue(value);
-    }
-  }
-}
-
 /**
  * 验证密钥强度
  *
@@ -76,7 +36,7 @@ function loadLocalEnv() {
  * @param {string} name - 密钥名称（用于错误消息）
  * @throws {Error} 如果密钥强度不足
  */
-function validateSecretStrength(secret, name = '密钥') {
+export function validateSecretStrength(secret, name = '密钥') {
   if (!secret) {
     throw new Error(
       `${name} 未设置。请在 .env 文件中设置强随机密钥。\n` +
@@ -136,7 +96,8 @@ function validateSecretStrength(secret, name = '密钥') {
 }
 
 export function createConfig(overrides = {}) {
-  loadLocalEnv();
+  // 使用dotenv替换自定义loadLocalEnv
+  dotenv.config({ path: path.join(serverDir, '.env') });
   const env = process.env;
 
   // 检查是否为测试环境

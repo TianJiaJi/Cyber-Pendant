@@ -11,7 +11,10 @@
   "dependencies": {
     "archiver": "^7.0.1",
     "cyber-pendant": "file:..",
+    "dotenv": "^17.4.2",
+    "escape-html": "^1.0.3",
     "exceljs": "^4.4.0",
+    "jsonwebtoken": "^9.0.3",
     "qrcode": "latest"
   },
   "engines": {

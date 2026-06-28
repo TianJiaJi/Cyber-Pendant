@@ -60,7 +60,7 @@ Core modules:
 - `api.js`: manual routing, public/admin/user APIs, CORS, admin SPA static hosting, QR generation.
 - `db.js`: SQLite schema, migrations, seed data, CRUD, binding logs, lost reports, stats, exports.
 - `auth.js`: PBKDF2 admin passwords, HMAC tokens, WeChat `code2session`.
-- `config.js`: `.env` loading, runtime defaults, path resolution.
+- `config.js`: `dotenv` based `.env` loading, runtime defaults, path resolution, secret validation.
 - `sn.js`: SN generation: `CP{YYYYMMDD}{6-char-alphanum}`, excluding `0`, `O`, `I`, `1`.
 - `prepare-admin.js`: auto-installs/builds `server/admin` when hosted assets are missing or stale.
 
@@ -219,11 +219,13 @@ The public garment DTO is assembled from clothing master data, batch data, SN st
 Server `.env` essentials:
 
 - `ADMIN_PASSWORD`
-- `TOKEN_SECRET`
-- `USER_TOKEN_SECRET`
+- `TOKEN_SECRET` (强度验证：≥32字符，无弱值模式，生产必须固定)
+- `USER_TOKEN_SECRET` (强度验证：≥32字符，建议与TOKEN_SECRET不同)
 - `FRONTEND_BASE_URL`
 - `WECHAT_APP_ID`
 - `WECHAT_APP_SECRET`
+
+生产环境启动时会自动验证密钥强度，不符合要求会抛出错误。临时或共享密钥会触发警告。
 
 Client `.env.local`:
 
@@ -273,3 +275,20 @@ When changing behavior, check these areas deliberately:
 - SQLite migrations and backward compatibility with legacy `garment_styles`.
 - Admin export columns and generated spreadsheet width arrays.
 - Mini Program topbar layout and button text alignment.
+
+## Code Quality Guidelines
+
+**拒绝重复造轮子**：
+
+- 优先使用 Node.js 标准库和成熟的 npm 包
+- 避免自定义已有标准解决方案的功能（如 .env 解析、HTML 转义等）
+- 消除重复代码，统一实现方式
+- 简化过度设计，保持代码精简
+- 保持向后兼容，重构不破坏现有功能
+
+**当前使用的标准库**：
+- `dotenv` - 环境变量加载
+- `escape-html` - XSS 防护
+- `qrcode` - 二维码生成
+- `node:sqlite` - 数据库
+- `node:crypto` - 加密操作

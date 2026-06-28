@@ -57,6 +57,30 @@ TOKEN_SECRET=replace-with-a-long-random-secret
 USER_TOKEN_SECRET=replace-with-a-different-long-random-secret
 ```
 
+**密钥强度要求**（使用标准 `dotenv` 库和统一验证函数）：
+- 密钥长度至少 32 字符
+- 不能包含常见弱值模式（如 `replace-with`、`changeme`、`password`、`12345678` 等）
+- 不能包含过多重复字符（超过 80% 为同一字符）
+- 生产环境启动时会自动验证密钥强度，不符合要求会抛出错误
+
+**生成强随机密钥**：
+
+```bash
+openssl rand -base64 32
+```
+
+**启动时安全检查**：
+- 如果 `TOKEN_SECRET` 未设置，系统会生成临时密钥并警告，服务器重启后所有 token 会失效
+- 如果 `TOKEN_SECRET` 和 `USER_TOKEN_SECRET` 相同，会警告建议使用不同的密钥提高安全性
+- 生产环境必须设置固定的强密钥，避免使用临时生成的值
+
+## 代码质量原则
+
+- **优先使用标准库**：用 `dotenv` 替代自定义 .env 解析器，用 `escape-html` 替代手动 HTML 转义
+- **消除重复代码**：统一密钥验证函数，删除重复实现
+- **简化过度设计**：移除不必要的自动清理和调试功能
+- **保持向后兼容**：重构过程保持 API 和配置完全兼容
+
 微信小程序登录还需要：
 
 ```env
@@ -223,14 +247,18 @@ server/admin/dist
 
 ### 后端
 
-后端使用 Node.js 内置模块和 SQLite：
+后端使用 Node.js 内置模块和标准库：
 
 - `node:http` 提供 HTTP 服务。
 - `node:sqlite` 存储数据。
 - PBKDF2 保存管理员密码。
 - HMAC token 区分管理员和用户身份。
 - `qrcode` 生成多种类型二维码。
+- `dotenv` 处理环境变量（标准库替代自定义实现）。
+- `escape-html` 进行 XSS 防护（OWASP 推荐标准库）。
 - SQLite 开启 `foreign_keys` 和 `WAL`。
+
+**代码重构原则**：优先使用标准库和成熟解决方案，消除重复造轮子，提升可维护性。
 
 后端启动时会执行 `ensureAdminBuild()`。如需跳过自动构建：
 
@@ -295,8 +323,8 @@ node --test server/admin/test/admin-ui.test.js
 | `ADMIN_BASE_PATH` | `/admin` | 后端托管管理台的访问路径 |
 | `ADMIN_STATIC_DIR` | `server/admin/dist` | 管理台构建产物目录 |
 | `CORS_ORIGIN` | `*` | CORS 允许来源 |
-| `TOKEN_SECRET` | 随机临时值 | 管理员 token 签名密钥，生产必须固定配置 |
-| `USER_TOKEN_SECRET` | 同 `TOKEN_SECRET` | 用户 token 签名密钥，生产建议单独配置 |
+| `TOKEN_SECRET` | 随机临时值 | 管理员 token 签名密钥，生产必须固定配置，强度要求≥32字符 |
+| `USER_TOKEN_SECRET` | 同 `TOKEN_SECRET` | 用户 token 签名密钥，生产建议单独配置，强度要求≥32字符 |
 | `USER_TOKEN_TTL_DAYS` | `30` | 用户 token 有效天数 |
 | `WECHAT_APP_ID` | 空 | 微信小程序 AppID（小程序码生成必需） |
 | `WECHAT_APP_SECRET` | 空 | 微信小程序 AppSecret（小程序码生成必需） |
@@ -395,6 +423,8 @@ CP{YYYYMMDD}{6位随机字符}
 - 管理员可查看完整绑定信息，但用户端不依赖客户端隐藏敏感字段。
 - 绑定操作、解绑操作、联系方式披露会记录审计信息。
 - 生产环境必须固定配置 `TOKEN_SECRET`、`USER_TOKEN_SECRET` 和 `ADMIN_PASSWORD`。
+- 密钥强度会在启动时自动验证，确保符合安全标准。
+- SN 导出和批量导出功能包含路径遍历保护，防止目录遍历攻击。
 
 更多原则见 [memory/security-principles.md](memory/security-principles.md)。
 
